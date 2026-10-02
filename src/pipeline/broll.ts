@@ -17,15 +17,19 @@ export async function listClips(dir: string): Promise<SourceClip[]> {
     .filter((n) => !n.startsWith(".") && VIDEO_EXTENSIONS.has(path.extname(n).toLowerCase()))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
+  return measureClips(names.map((name) => path.resolve(dir, name)));
+}
+
+/** Reads each file's duration, skipping (with a warning) any that can't be read. */
+export async function measureClips(files: string[]): Promise<SourceClip[]> {
   const clips: SourceClip[] = [];
-  for (const name of names) {
-    const file = path.resolve(dir, name);
-    const meta = await getVideoMetadata(file, { logLevel: "error" });
-    if (!meta.durationInSeconds || meta.durationInSeconds <= 0) {
-      console.warn(`  ! Skipping ${name}: could not determine duration`);
+  for (const file of files) {
+    const meta = await getVideoMetadata(file, { logLevel: "error" }).catch(() => null);
+    if (!meta?.durationInSeconds || meta.durationInSeconds <= 0) {
+      console.warn(`  ! Skipping ${path.basename(file)}: could not determine duration`);
       continue;
     }
-    clips.push({ file, durationInSeconds: meta.durationInSeconds });
+    clips.push({ file: path.resolve(file), durationInSeconds: meta.durationInSeconds });
   }
   return clips;
 }
@@ -102,5 +106,37 @@ export function planShots(
     t += len;
     i++;
   }
+  return shots;
+}
+
+export type SegmentPlan = {
+  /** Seconds; segments should be contiguous and cover the whole timeline. */
+  start: number;
+  end: number;
+  clips: { src: string; durationInSeconds: number }[];
+};
+
+/**
+ * Plans each segment on its own with planShots(), so the footage matched to a
+ * sentence plays while that sentence is spoken. The last segment runs to `totalFrames`.
+ */
+export function planSegmentedShots(
+  segments: SegmentPlan[],
+  totalFrames: number,
+  cutPointsSeconds: number[],
+  options: Partial<PlanOptions> = {},
+): Shot[] {
+  const fps = options.fps ?? DEFAULT_PLAN_OPTIONS.fps;
+  const shots: Shot[] = [];
+  segments.forEach((seg, i) => {
+    const from = i === 0 ? 0 : Math.round(seg.start * fps);
+    const to = i === segments.length - 1 ? totalFrames : Math.round(seg.end * fps);
+    if (to <= from) return;
+    // Cut points relative to this segment (excluding its own edges).
+    const cuts = cutPointsSeconds.map((c) => c - from / fps).filter((c) => c > 0 && c < (to - from) / fps);
+    for (const shot of planShots(seg.clips, to - from, cuts, options)) {
+      shots.push({ ...shot, from: shot.from + from });
+    }
+  });
   return shots;
 }

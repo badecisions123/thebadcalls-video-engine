@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import type { CaptionPage, Word } from "../types";
+import { fetchStockBroll, type PixabayHit, pickRendition, rankHits, scriptSegments, searchTerms } from "./stock";
+
+const w = (text: string, start: number, end: number, emphasis?: Word["emphasis"]): Word => ({ text, start, end, emphasis });
+const page = (...words: Word[]): CaptionPage => ({
+  text: words.map((x) => x.text).join(" "),
+  start: words[0].start,
+  end: words[words.length - 1].end,
+  words,
+});
+
+const hit = (id: number, width: number, height: number, duration = 10): PixabayHit => ({
+  id,
+  pageURL: `https://pixabay.com/videos/${id}/`,
+  tags: "test",
+  duration,
+  videos: {
+    large: { url: "", width: 0, height: 0, size: 0 },
+    medium: { url: `https://cdn.pixabay.com/${id}/medium.mp4`, width, height, size: 1 },
+    small: { url: `https://cdn.pixabay.com/${id}/small.mp4`, width: width / 2, height: height / 2, size: 1 },
+  },
+});
+
+test("searchTerms puts names first and skips filler, numbers and money", () => {
+  const words = [
+    w("In", 0, 1),
+    w("2000,", 1, 2, "key"),
+    w("Netflix", 2, 3, "key"),
+    w("offered", 3, 4),
+    w("to", 4, 5),
+    w("sell", 5, 6),
+    w("itself", 6, 7),
+    w("to", 7, 8),
+    w("Blockbuster", 8, 9, "key"),
+    w("for", 9, 10),
+    w("$50", 10, 11, "money"),
+    w("million.", 11, 12, "money"),
+  ];
+  assert.deepEqual(searchTerms(words), ["blockbuster", "netflix", "sell"]);
+  assert.deepEqual(searchTerms([w("Ten", 0, 1), w("years", 1, 2), w("hundreds", 2, 3), w("of", 3, 4), w("stores.", 4, 5)]), ["stores"]);
+});
+
+test("scriptSegments splits on sentences, merges short ones, and covers the whole timeline", () => {
+  const pages = [
+    page(w("Blockbuster", 0.2, 1), w("was", 1, 1.5), w("huge.", 1.5, 3)),
+    page(w("Then", 3.2, 3.5), w("Netflix", 3.5, 4), w("arrived.", 4, 6)),
+    page(w("Oops.", 6.2, 6.8)), // too short on its own: merged into the sentence before
+  ];
+  const segs = scriptSegments(pages, 8);
+  assert.equal(segs.length, 2);
+  assert.equal(segs[0].start, 0);
+  assert.equal(segs[0].end, 3.2);
+  assert.equal(segs[1].start, 3.2);
+  assert.equal(segs[1].end, 8);
+  assert.equal(segs[1].text, "Then Netflix arrived. Oops.");
+});
+
+test("pickRendition prefers the smallest file that is at least 1080px tall", () => {
+  assert.equal(pickRendition(hit(1, 1920, 1080))?.width, 1920);
+  assert.equal(pickRendition(hit(2, 1280, 720))?.width, 1280); // none tall enough: take the tallest
+});
+
+test("rankHits puts portrait clips first and drops short or already-used clips", () => {
+  const ranked = rankHits([hit(1, 1920, 1080), hit(2, 1080, 1920), hit(3, 1080, 1920, 1), hit(4, 1920, 1080)], 3, new Set([4]));
+  assert.deepEqual(ranked.map((h) => h.id), [2, 1]);
+});
+
+test("fetchStockBroll queries per segment, falls back, dedupes and downloads", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "stock-"));
+  const queries: string[] = [];
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.hostname === "pixabay.com") {
+      const q = url.searchParams.get("q")!;
+      queries.push(q);
+      assert.equal(url.searchParams.get("key"), "secret");
+      const hits = q === "popcorn" ? [hit(10, 1920, 1080)] : q === "business" ? [hit(10, 1920, 1080), hit(11, 1920, 1080)] : [];
+      return new Response(JSON.stringify({ total: hits.length, totalHits: hits.length, hits }));
+    }
+    return new Response(`video ${url.pathname}`);
+  }) as typeof fetch;
+
+  try {
+    const segments = [
+      { text: "Popcorn time.", start: 0, end: 3, words: [w("Popcorn", 0.1, 1), w("time.", 1, 2)] },
+      { text: "Glorp happened.", start: 3, end: 6, words: [w("Glorp", 3.1, 4), w("happened.", 4, 5)] },
+    ];
+    const clips = await fetchStockBroll(segments, {
+      apiKey: "secret",
+      cacheDir: dir,
+      fetchImpl: fakeFetch,
+      targetShot: 3,
+      maxPerSegment: 2,
+      minClipSeconds: 3,
+      fallbackTerms: ["business"],
+    });
+
+    assert.deepEqual(clips.map((c) => [c.segment, c.pixabayId, c.query]), [
+      [0, 10, "popcorn"],
+      [1, 11, "business"], // 10 was already used by segment 0
+    ]);
+    assert.ok(existsSync(clips[0].file));
+    assert.equal(await readFile(clips[0].file, "utf8"), "video /10/medium.mp4");
+
+    // Search results are cached, so a second run makes no new API calls.
+    const before = queries.length;
+    await fetchStockBroll(segments, {
+      apiKey: "secret",
+      cacheDir: dir,
+      fetchImpl: fakeFetch,
+      targetShot: 3,
+      maxPerSegment: 2,
+      minClipSeconds: 3,
+      fallbackTerms: ["business"],
+    });
+    assert.equal(queries.length, before);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

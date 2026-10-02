@@ -1,10 +1,14 @@
 # thebadcalls-video-engine
 
-Turns a text script and a folder of B-roll into a finished vertical (1080×1920) MP4:
+Turns a text script into a finished vertical (1080×1920) MP4, using your own B-roll folder or stock clips fetched from Pixabay:
 
 1. **Voiceover**: sends the script to ElevenLabs (`/text-to-speech/{voice}/with-timestamps`), which returns the MP3 along with timings for every character.
 2. **Captions**: groups those character timings into words, then into short caption pages (3 words by default). Each word pops in as it's spoken, and key words get called out (see below). An `.srt` file is written next to the video.
-3. **B-roll**: takes the clips in the folder in name order (`clip2` comes before `clip10`) and repeats them if the voiceover runs longer. Each cut lands on a sentence or clause break when one falls inside the allowed shot length.
+3. **B-roll**: two options.
+   - **From Pixabay** (leave out `--broll`): the script is split into sentences, and each sentence is searched on Pixabay using its own keywords. Each sentence's clips play while that sentence is spoken. See [Stock B-roll from Pixabay](#stock-b-roll-from-pixabay).
+   - **From a folder** (`--broll <dir>`): clips play in name order (`clip2` comes before `clip10`) and repeat if the voiceover runs longer.
+
+   Either way, cuts land on sentence or clause breaks and on emphasized words when one falls inside the allowed shot length.
 4. **Render**: Remotion lays the shots out back to back, crops them to fill 9:16, adds motion, captions, a progress bar and the voiceover, and renders an H.264 MP4.
 
 ## Caption styles
@@ -30,25 +34,49 @@ To force a callout, wrap the words in asterisks in your script: `*Toys R Us* fil
 
 B-roll cuts are lined up with sentence breaks and with the moments emphasized words land.
 
+## Stock B-roll from Pixabay
+
+When you leave out `--broll`, the pipeline finds and downloads clips itself:
+
+1. **Split into sentences.** The captions are grouped into sentences. Any sentence shorter than 2 seconds is merged with its neighbor, so "The lesson?" doesn't get its own search.
+2. **Pick keywords.** Each sentence's words are ranked as search terms: names and `*marked*` words first, then bad-news words, then other content words, longer ones first. Filler words, common verbs, numbers and money amounts are skipped, because "offered" or "$50" find nothing useful.
+3. **Search Pixabay** (`https://pixabay.com/api/videos/`). The searches are tried in this order:
+   - the top two terms together, like `blockbuster netflix`
+   - each term on its own
+   - the strongest terms from the whole script
+   - `--stock-fallback` (default `business,office,city`)
+
+   Clips shorter than `--min-shot` are skipped and portrait clips are preferred. No clip is used twice in one video.
+4. **Download.** For each clip, the smallest file that's at least 1080px tall is downloaded, because it gets cropped to 9:16 anyway. Each sentence gets about one clip per `--target-shot` seconds, up to `--stock-per-sentence` (default 2).
+
+**Caching:** search results are cached for 24 hours (Pixabay's API terms require caching) and downloaded videos are kept, both in `out/.cache/pixabay/`. Re-rendering a script doesn't repeat searches or downloads.
+
+**Sources:** each run writes `out/.work/<name>/broll-sources.json`, listing every clip's Pixabay page and the search that found it.
+
+**API key:** set `PIXABAY_API_KEY` (free at https://pixabay.com/api/docs/). Pixabay only accepts the key as the `key` URL query parameter, not in a request body. If a proxy injects the key for you, it has to be set up as a query parameter.
+
 ## Setup
 
 Requires Node 18+ (22 recommended).
 
 ```bash
 npm install
-cp .env.example .env   # then set ELEVENLABS_API_KEY
+cp .env.example .env   # then set ELEVENLABS_API_KEY, and PIXABAY_API_KEY for stock B-roll
 ```
 
 ## Usage
 
 ```bash
-npm run make -- --script examples/script.txt --broll ./my-broll --out out/video.mp4
+npm run make -- --script examples/script.txt                      # B-roll from Pixabay
+npm run make -- --script examples/script.txt --broll ./my-broll    # your own clips
 ```
 
 | Flag | Default | |
 |---|---|---|
 | `--script <file>` | required | Script text file (`-` = stdin) |
-| `--broll <dir>` | required | Folder of `.mp4/.mov/.m4v/.webm/.mkv` clips |
+| `--broll <dir>` | Pixabay | Folder of your own `.mp4/.mov/.m4v/.webm/.mkv` clips. Leave it out to fetch matching clips from Pixabay |
+| `--stock-fallback <list>` | `business,office,city` | Pixabay searches to try when a sentence finds nothing |
+| `--stock-per-sentence <n>` | `2` | Max Pixabay clips per sentence |
 | `--out <file>` | `out/<script>.mp4` | Output path (the `.srt` file goes next to it) |
 | `--voice <id>` | `$ELEVENLABS_VOICE_ID` or Mark | ElevenLabs voice ID (default is "Mark", `WTUK291rZZ9CLPCiFTfh`) |
 | `--model <id>` | `eleven_multilingual_v2` | ElevenLabs model |
@@ -79,7 +107,8 @@ src/
     voiceover.ts         # ElevenLabs TTS with timestamps, cached
     captions.ts          # characters -> words -> caption pages, plus SRT output
     emphasis.ts          # *markers*, plus auto-detected names, money and bad-news words
-    broll.ts             # clip discovery and planShots() (pure, unit tested)
+    broll.ts             # clip discovery, planShots() and per-sentence planSegmentedShots()
+    stock.ts             # sentences, keywords, Pixabay search, download and cache
     render.ts            # Remotion bundle, selectComposition and renderMedia
   remotion/
     Root.tsx             # 1080x1920 composition; duration comes from props
@@ -94,6 +123,6 @@ src/
 ## Known limits / next steps
 
 - ElevenLabs caps the length of a single request (about 5,000 to 10,000 characters depending on the model). Longer scripts will need to be split into chunks and joined.
-- B-roll is played in folder order. Matching clips to the script by keyword or tag would be a natural next step.
+- Pixabay matching uses keywords only. A brand name like "Blockbuster" may return loosely related footage, so check `broll-sources.json`. If one sentence keeps getting bad footage, use your own folder for that video instead.
 - No background music or sound effects yet. A whoosh or hit under emphasized words would add a lot, and ElevenLabs' sound-effects API could generate them once and reuse them.
 - Remotion is free for individuals and small teams. Larger companies need a [company license](https://www.remotion.dev/license).

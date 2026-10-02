@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planShots } from "./broll";
+import { planSegmentedShots, planShots } from "./broll";
 
 const fps = 30;
 
@@ -46,4 +46,20 @@ test("avoids a tiny final shot", () => {
   const shots = planShots(clips, Math.round(6.3 * fps), [], { fps, targetShot: 3, minShot: 1.5 });
   assertContiguous(shots, Math.round(6.3 * fps));
   assert.ok(shots[shots.length - 1].durationInFrames >= 1.5 * fps);
+});
+
+test("segmented plan keeps each segment's clips inside its time span", () => {
+  const segments = [
+    { start: 0, end: 4, clips: [{ src: "a.mp4", durationInSeconds: 10 }] },
+    { start: 4, end: 9, clips: [{ src: "b1.mp4", durationInSeconds: 3 }, { src: "b2.mp4", durationInSeconds: 3 }] },
+  ];
+  const total = 10 * fps;
+  const shots = planSegmentedShots(segments, total, [], { fps });
+  assertContiguous(shots, total);
+  for (const s of shots) {
+    if (s.src === "a.mp4") assert.ok(s.from + s.durationInFrames <= 4 * fps);
+    else assert.ok(s.from >= 4 * fps);
+  }
+  // The last segment stretches to the end of the video.
+  assert.ok(shots[shots.length - 1].src.startsWith("b"));
 });

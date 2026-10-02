@@ -3,10 +3,11 @@ import { existsSync } from "node:fs";
 import { copyFile, link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { listClips, planShots } from "./pipeline/broll";
+import { listClips, measureClips, planSegmentedShots, planShots, type SourceClip } from "./pipeline/broll";
 import { alignmentToWords, buildCaptionPages, sentenceBoundaries, toSrt } from "./pipeline/captions";
 import { applyEmphasis, parseScript } from "./pipeline/emphasis";
 import { renderVideo } from "./pipeline/render";
+import { fetchStockBroll, scriptSegments } from "./pipeline/stock";
 import { generateVoiceover } from "./pipeline/voiceover";
 import { CAPTION_PRESETS, DEFAULT_EFFECTS, type VideoProps } from "./types";
 
@@ -14,12 +15,19 @@ import { CAPTION_PRESETS, DEFAULT_EFFECTS, type VideoProps } from "./types";
 const DEFAULT_VOICE_ID = "WTUK291rZZ9CLPCiFTfh";
 
 const USAGE = `
-Usage: npm run make -- --script <file> --broll <dir> [options]
+Usage: npm run make -- --script <file> [--broll <dir>] [options]
 
 Required:
   --script <file>          Text file with the voiceover script ("-" reads stdin).
                            Wrap words in *asterisks* to call them out on screen.
-  --broll <dir>            Folder of B-roll clips (.mp4/.mov/.webm/...), used in name order
+
+B-roll (pick one):
+  --broll <dir>            Folder of your own clips (.mp4/.mov/.webm/...), used in name order
+  (no --broll)             Fetch clips from Pixabay, matched to each sentence's keywords.
+                           Needs $PIXABAY_API_KEY.
+  --stock-fallback <list>  Comma-separated searches used when a sentence finds nothing
+                           (default: business,office,city)
+  --stock-per-sentence <n> Max Pixabay clips per sentence (default: 2)
 
 Options:
   --out <file>             Output MP4 (default: out/<script-name>.mp4)
@@ -83,11 +91,13 @@ async function main() {
       "no-motion": { type: "boolean", default: false },
       "no-progress": { type: "boolean", default: false },
       browser: { type: "string" },
+      "stock-fallback": { type: "string", default: "business,office,city" },
+      "stock-per-sentence": { type: "string", default: "2" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
 
-  if (args.help || !args.script || !args.broll) {
+  if (args.help || !args.script) {
     console.log(USAGE);
     process.exit(args.help ? 0 : 1);
   }
@@ -135,29 +145,69 @@ async function main() {
   }
 
   // 3) B-roll
-  console.log(`3/4 Planning B-roll from ${args.broll}...`);
-  const clips = await listClips(args.broll);
-  if (!clips.length) throw new Error(`No video clips found in ${args.broll}`);
-  const staged = await Promise.all(
-    clips.map(async (c, i) => {
-      const src = `broll/${String(i).padStart(3, "0")}${path.extname(c.file).toLowerCase()}`;
-      await mkdir(path.join(publicDir, "broll"), { recursive: true });
-      await stage(c.file, path.join(publicDir, src));
-      return { src, durationInSeconds: c.durationInSeconds };
-    }),
-  );
   await stage(vo.audioPath, path.join(publicDir, "voiceover.mp3"));
-
+  await mkdir(path.join(publicDir, "broll"), { recursive: true });
   const durationInFrames = Math.ceil((audioSeconds + Number(args.tail)) * fps);
-  // Cut on sentence breaks and right as emphasized words land.
-  const cutPoints = [...sentenceBoundaries(captions), ...emphasized.map((w) => w.start)];
-  const shots = planShots(staged, durationInFrames, cutPoints, {
+  const planOptions = {
     fps,
     minShot: Number(args["min-shot"]),
     targetShot: Number(args["target-shot"]),
     maxShot: Number(args["max-shot"]),
-  });
-  console.log(`    ${clips.length} clips -> ${shots.length} shots`);
+  };
+  // Cut on sentence breaks and right as emphasized words land.
+  const cutPoints = [...sentenceBoundaries(captions), ...emphasized.map((w) => w.start)];
+
+  /** Links clips into the render's public dir; `src` is what the composition loads. */
+  const stageClips = (clips: SourceClip[]) =>
+    Promise.all(
+      clips.map(async (c, i) => {
+        const src = `broll/${String(i).padStart(3, "0")}${path.extname(c.file).toLowerCase()}`;
+        await stage(c.file, path.join(publicDir, src));
+        return { ...c, src };
+      }),
+    );
+
+  let shots;
+  if (args.broll) {
+    console.log(`3/4 Planning B-roll from ${args.broll}...`);
+    const clips = await listClips(args.broll);
+    if (!clips.length) throw new Error(`No video clips found in ${args.broll}`);
+    const staged = await stageClips(clips);
+    shots = planShots(staged, durationInFrames, cutPoints, planOptions);
+    console.log(`    ${clips.length} clips -> ${shots.length} shots`);
+  } else {
+    console.log("3/4 Fetching B-roll from Pixabay to match the script...");
+    if (!process.env.PIXABAY_API_KEY) {
+      console.warn("    ! PIXABAY_API_KEY is not set; the search will likely be rejected.");
+    }
+    const segments = scriptSegments(captions, durationInFrames / fps);
+    const stock = await fetchStockBroll(segments, {
+      apiKey: process.env.PIXABAY_API_KEY,
+      cacheDir: path.resolve("out/.cache/pixabay"),
+      targetShot: planOptions.targetShot,
+      maxPerSegment: Math.max(1, Number(args["stock-per-sentence"])),
+      minClipSeconds: planOptions.minShot,
+      fallbackTerms: args["stock-fallback"].split(",").map((t) => t.trim()).filter(Boolean),
+      log: (line) => console.log(line),
+    });
+    const staged = await stageClips(await measureClips(stock.map((c) => c.file)));
+    const segmentOf = new Map(stock.map((c) => [path.resolve(c.file), c.segment]));
+    shots = planSegmentedShots(
+      segments.map((seg, i) => {
+        // A clip that failed to load leaves its sentence empty; borrow from the others then.
+        const own = staged.filter((c) => segmentOf.get(c.file) === i);
+        return { start: seg.start, end: seg.end, clips: own.length ? own : staged };
+      }),
+      durationInFrames,
+      cutPoints,
+      planOptions,
+    );
+    await writeFile(
+      path.join(workDir, "broll-sources.json"),
+      JSON.stringify(stock.map(({ segment, query, pixabayId, pageURL }) => ({ segment, query, pixabayId, pageURL })), null, 2),
+    );
+    console.log(`    ${segments.length} sentences -> ${stock.length} clips -> ${shots.length} shots`);
+  }
 
   const props: VideoProps = {
     fps,
