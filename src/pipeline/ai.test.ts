@@ -34,6 +34,10 @@ test("aiConfigFromEnv: Gemini by key, any OpenAI-compatible server by URL, nothi
   const local = aiConfigFromEnv({ AI_BASE_URL: "http://localhost:1234/v1/", AI_MODEL: "qwen", AI_VISION: "false", GEMINI_API_KEY: "g" })!;
   assert.deepEqual([local.baseUrl, local.model, local.apiKey, local.vision], ["http://localhost:1234/v1", "qwen", undefined, false]);
   assert.throws(() => aiConfigFromEnv({ AI_BASE_URL: "http://localhost:1234/v1" }), /AI_MODEL/);
+  // Key added by a proxy: no key in the environment, so no Authorization header is sent.
+  const proxied = aiConfigFromEnv({ AI_PROVIDER: "gemini" })!;
+  assert.match(proxied.baseUrl, /generativelanguage/);
+  assert.equal(proxied.apiKey, undefined);
 });
 
 test("parseJsonReply finds JSON inside code fences and prose", () => {

@@ -25,7 +25,8 @@ const GEMINI_DEFAULT_MODEL = "gemini-flash-latest";
  * Reads the AI settings:
  * - AI_BASE_URL (+ AI_MODEL, optional AI_API_KEY) for any OpenAI-compatible server,
  *   e.g. LM Studio at http://localhost:1234/v1
- * - otherwise GEMINI_API_KEY (+ optional GEMINI_MODEL) for Google Gemini
+ * - otherwise GEMINI_API_KEY (+ optional GEMINI_MODEL) for Google Gemini, or
+ *   AI_PROVIDER=gemini when a proxy adds the key to requests itself
  * AI_VISION=false turns off preview checking for text-only models.
  * Returns undefined when nothing is configured.
  */
@@ -35,7 +36,7 @@ export function aiConfigFromEnv(env: NodeJS.ProcessEnv): AiConfig | undefined {
     if (!env.AI_MODEL) throw new Error("AI_BASE_URL is set but AI_MODEL is not (use the model name your server shows)");
     return { baseUrl: env.AI_BASE_URL.replace(/\/+$/, ""), apiKey: env.AI_API_KEY, model: env.AI_MODEL, vision };
   }
-  if (env.GEMINI_API_KEY) {
+  if (env.GEMINI_API_KEY || env.AI_PROVIDER?.toLowerCase() === "gemini") {
     return { baseUrl: GEMINI_BASE_URL, apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL ?? GEMINI_DEFAULT_MODEL, vision };
   }
   return undefined;

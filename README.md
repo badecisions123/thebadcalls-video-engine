@@ -62,7 +62,7 @@ Any OpenAI-compatible chat server works. Set one of these:
 
 | Provider | Settings |
 |---|---|
-| **Google Gemini** (free tier available) | `GEMINI_API_KEY=...` (optional `GEMINI_MODEL`, default `gemini-flash-latest`) |
+| **Google Gemini** (free tier available) | `GEMINI_API_KEY=...` (optional `GEMINI_MODEL`, default `gemini-flash-latest`). In a Claude cloud environment you can instead add the key as a **Bearer credential** for `generativelanguage.googleapis.com` and set `AI_PROVIDER=gemini` |
 | **LM Studio** on your PC (free, local) | `AI_BASE_URL=http://localhost:1234/v1` and `AI_MODEL=<model name shown in LM Studio>` |
 | Groq, OpenRouter, Ollama... | `AI_BASE_URL`, `AI_MODEL`, and `AI_API_KEY` if the server needs one |
 
