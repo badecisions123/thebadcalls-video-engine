@@ -1,0 +1,7 @@
+node_modules/
+out/
+.env
+*.mp4
+*.mov
+*.mp3
+!examples/**/*.mp4
