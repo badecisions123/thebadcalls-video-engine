@@ -44,3 +44,13 @@ test("auto-detected names are only called out on first mention", () => {
   const out = applyEmphasis(words("They met Blockbuster. Then Blockbuster said no to Blockbuster"), { auto: true });
   assert.equal(out.filter((w) => w.emphasis === "key").length, 1);
 });
+
+test("parseScript pulls out [search terms] and ties them to the next word", () => {
+  const { text, marked, hints } = parseScript("[video rental store, vhs] Blockbuster was *huge*. It [empty store] failed.");
+  assert.equal(text, "Blockbuster was huge. It failed.");
+  assert.equal(marked.length, 5);
+  assert.deepEqual(hints, [
+    { word: 0, queries: ["video rental store", "vhs"] },
+    { word: 4, queries: ["empty store"] },
+  ]);
+});

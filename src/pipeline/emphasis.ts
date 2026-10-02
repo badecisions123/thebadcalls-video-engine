@@ -36,19 +36,44 @@ export function toneOf(text: string): Emphasis | undefined {
   return undefined;
 }
 
+/** B-roll searches written into the script, e.g. `[video rental store, vhs tapes]`. */
+export type BrollHint = {
+  /** Index of the spoken word the hint sits in front of (its sentence gets the hint). */
+  word: number;
+  queries: string[];
+};
+
 /**
- * Strips `*emphasis*` markers from a script. Returns the plain text to send to
- * the voice, plus which whitespace-separated words were marked. Markers can
- * wrap several words: `*Toys R Us*`.
+ * Strips markup from a script and returns the plain text to send to the voice:
+ * - `*emphasis*` markers, recorded per whitespace-separated word in `marked`.
+ *   Markers can wrap several words: `*Toys R Us*`.
+ * - `[search terms]` B-roll hints, recorded against the next spoken word.
  */
-export function parseScript(script: string): { text: string; marked: boolean[] } {
+export function parseScript(script: string): { text: string; marked: boolean[]; hints: BrollHint[] } {
   let text = "";
   let inside = false;
   const marked: boolean[] = [];
+  const hints: BrollHint[] = [];
   let wordMarked = false;
   let inWord = false;
+  let hint: string | null = null;
 
   for (const ch of script) {
+    if (hint !== null) {
+      if (ch === "]") {
+        const queries = hint.split(",").map((q) => q.trim()).filter(Boolean);
+        // marked.length is the index of the word in progress, or of the next one.
+        if (queries.length) hints.push({ word: marked.length, queries });
+        hint = null;
+      } else {
+        hint += ch;
+      }
+      continue;
+    }
+    if (ch === "[") {
+      hint = "";
+      continue;
+    }
     if (ch === "*") {
       inside = !inside;
       continue;
@@ -64,7 +89,10 @@ export function parseScript(script: string): { text: string; marked: boolean[] }
     text += ch;
   }
   if (inWord) marked.push(wordMarked);
-  return { text, marked };
+  // A hint after the last word belongs to the last word.
+  for (const h of hints) h.word = Math.min(h.word, Math.max(0, marked.length - 1));
+  // Removing hints can leave doubled spaces; tidy them (word counts are unaffected).
+  return { text: text.replace(/[ \t]{2,}/g, " ").trim(), marked, hints };
 }
 
 export type EmphasisOptions = {

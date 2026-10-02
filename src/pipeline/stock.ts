@@ -15,6 +15,8 @@ export type Segment = {
   start: number;
   end: number;
   words: Word[];
+  /** Searches written in the script as `[video rental store]`, tried before anything else. */
+  queries?: string[];
 };
 
 const SENTENCE_END = /[.!?…]["')\]]*$/;
@@ -179,12 +181,54 @@ export function pickRendition(hit: PixabayHit): Rendition | undefined {
   return bigEnough[0] ?? all.sort((a, b) => b.height - a.height)[0];
 }
 
-/** Ranks hits: portrait clips first (no crop needed), then Pixabay's popularity order. */
-export function rankHits(hits: PixabayHit[], minSeconds: number, exclude: Set<number>): PixabayHit[] {
+// Footage that never works as B-roll under captions.
+const JUNK_TAGS = /green ?screen|chroma|alpha channel|transparent|ai generated|anime|cartoon|animation|animated|intro|countdown|3d render/i;
+// Pixabay matches any tag, and uploaders often stuff dozens of loosely related tags,
+// so a query word only counts if it's among a clip's first few tags.
+const RELEVANT_TAG_POSITIONS = 8;
+
+/**
+ * How well a hit's tags match the query: [matched words, sum of their tag positions],
+ * or [0, 0] when it doesn't match well enough. Every word of a one- or two-word
+ * query must match (so "watching tv" doesn't take a "bird watching" clip);
+ * longer queries may miss one word. A tag containing the whole phrase counts as all words.
+ */
+function tagMatch(hit: PixabayHit, query: string): [number, number] {
+  const tags = hit.tags.toLowerCase().split(/\s*,\s*/).slice(0, RELEVANT_TAG_POSITIONS);
+  const phrase = query.toLowerCase().trim();
+  const terms = phrase.split(/\s+/).filter((t) => t.length > 1);
+  const phraseAt = tags.findIndex((tag) => tag.includes(phrase));
+  if (phraseAt >= 0) return [terms.length, phraseAt];
+
+  let matched = 0;
+  let positions = 0;
+  for (const term of terms) {
+    const at = tags.findIndex((tag) => tag.split(/\s+/).some((word) => word === term || word.startsWith(term)));
+    if (at >= 0) {
+      matched++;
+      positions += at;
+    }
+  }
+  const needed = terms.length <= 2 ? terms.length : terms.length - 1;
+  return matched >= needed ? [matched, positions] : [0, 0];
+}
+
+/**
+ * Keeps hits that are long enough, unused, not junk (green screen, AI, cartoons...)
+ * and actually about the query (a query word among their first tags). Ranks by
+ * how many query words match, then portrait first (no crop), then Pixabay's order.
+ */
+export function rankHits(hits: PixabayHit[], minSeconds: number, exclude: Set<number>, query = ""): PixabayHit[] {
   return hits
-    .map((hit, i) => ({ hit, i, r: pickRendition(hit) }))
-    .filter(({ hit, r }) => r && hit.duration >= minSeconds && !exclude.has(hit.id))
-    .sort((a, b) => Number(b.r!.height > b.r!.width) - Number(a.r!.height > a.r!.width) || a.i - b.i)
+    .map((hit, i) => ({ hit, i, r: pickRendition(hit), m: query ? tagMatch(hit, query) : ([1, 0] as [number, number]) }))
+    .filter(({ hit, r, m }) => r && hit.duration >= minSeconds && !exclude.has(hit.id) && !JUNK_TAGS.test(hit.tags) && m[0] > 0)
+    .sort(
+      (a, b) =>
+        b.m[0] - a.m[0] ||
+        Number(b.r!.height > b.r!.width) - Number(a.r!.height > a.r!.width) ||
+        a.m[1] - b.m[1] ||
+        a.i - b.i,
+    )
     .map(({ hit }) => hit);
 }
 
@@ -235,6 +279,7 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
     const own = searchTerms(seg.words);
     // Two-word query first (more specific), then each term alone, then script-wide terms, then the fallbacks.
     const queries = [
+      ...(seg.queries ?? []),
       ...(own.length >= 2 ? [`${own[0]} ${own[1]}`] : []),
       ...own,
       ...scriptTerms.filter((t) => !own.includes(t)),
@@ -244,7 +289,7 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
     const picked: StockClip[] = [];
     for (const query of queries) {
       if (picked.length >= want) break;
-      const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used);
+      const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query);
       for (const hit of hits) {
         if (picked.length >= want) break;
         const r = pickRendition(hit)!;

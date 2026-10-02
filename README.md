@@ -39,15 +39,26 @@ B-roll cuts are lined up with sentence breaks and with the moments emphasized wo
 When you leave out `--broll`, the pipeline finds and downloads clips itself:
 
 1. **Split into sentences.** The captions are grouped into sentences. Any sentence shorter than 2 seconds is merged with its neighbor, so "The lesson?" doesn't get its own search.
-2. **Pick keywords.** Each sentence's words are ranked as search terms: names and `*marked*` words first, then bad-news words, then other content words, longer ones first. Filler words, common verbs, numbers and money amounts are skipped, because "offered" or "$50" find nothing useful.
+2. **Pick keywords.** If the sentence starts with `[search terms]` in your script, those are searched first (see below). Then each sentence's words are ranked as search terms: names and `*marked*` words first, then bad-news words, then other content words, longer ones first. Filler words, common verbs, numbers and money amounts are skipped, because "offered" or "$50" find nothing useful.
 3. **Search Pixabay** (`https://pixabay.com/api/videos/`). The searches are tried in this order:
    - the top two terms together, like `blockbuster netflix`
    - each term on its own
    - the strongest terms from the whole script
    - `--stock-fallback` (default `business,office,city`)
 
-   Clips shorter than `--min-shot` are skipped and portrait clips are preferred. No clip is used twice in one video.
+   A clip only counts as a match if the search words appear in its **first 8 tags**. Uploaders often pile on loosely related tags; one clip of a frog was tagged "netflix" in 19th place. Every word of a one- or two-word search must match, so "watching tv" won't pick a clip tagged "bird watching". Green-screen, AI-generated, cartoon/anime and "intro" clips are skipped, as are clips shorter than `--min-shot`. Portrait clips are preferred, and no clip is used twice in one video.
 4. **Download.** For each clip, the smallest file that's at least 1080px tall is downloaded, because it gets cropped to 9:16 anyway. Each sentence gets about one clip per `--target-shot` seconds, up to `--stock-per-sentence` (default 2).
+
+### Choosing the footage yourself: `[search terms]`
+
+Keyword matching works for concrete words ("chess", "office"), but not for brand names or figures of speech. Pixabay has almost no "Blockbuster" footage, and "laughed out of the room" finds a bedroom. Start a sentence with the footage you want in square brackets. Separate several searches with commas, and they're tried in order:
+
+```
+[movie theater, popcorn] In 2000, Netflix offered to sell itself to Blockbuster for just $50 million.
+[business meeting, laughing] Blockbuster laughed them out of the room.
+```
+
+The brackets are removed before the script goes to ElevenLabs, so adding or changing them never costs voice credits. If none of your searches find anything, the sentence falls back to its own keywords. Short, concrete searches work best on Pixabay, and wording matters: "streaming" finds rivers, and "remote control" finds toy cars.
 
 **Caching:** search results are cached for 24 hours (Pixabay's API terms require caching) and downloaded videos are kept, both in `out/.cache/pixabay/`. Re-rendering a script doesn't repeat searches or downloads.
 
@@ -123,6 +134,6 @@ src/
 ## Known limits / next steps
 
 - ElevenLabs caps the length of a single request (about 5,000 to 10,000 characters depending on the model). Longer scripts will need to be split into chunks and joined.
-- Pixabay matching uses keywords only. A brand name like "Blockbuster" may return loosely related footage, so check `broll-sources.json`. If one sentence keeps getting bad footage, use your own folder for that video instead.
+- Pixabay matching relies on tags, and some clips are mistagged. In testing, a clip tagged "movie theater" showed a foggy mountain. Skim the result or `broll-sources.json` before posting, and change a sentence's `[search terms]` if its footage is off.
 - No background music or sound effects yet. A whoosh or hit under emphasized words would add a lot, and ElevenLabs' sound-effects API could generate them once and reuse them.
 - Remotion is free for individuals and small teams. Larger companies need a [company license](https://www.remotion.dev/license).

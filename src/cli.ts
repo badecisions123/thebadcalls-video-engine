@@ -20,6 +20,7 @@ Usage: npm run make -- --script <file> [--broll <dir>] [options]
 Required:
   --script <file>          Text file with the voiceover script ("-" reads stdin).
                            Wrap words in *asterisks* to call them out on screen.
+                           Start a sentence with [search terms] to pick its Pixabay footage.
 
 B-roll (pick one):
   --broll <dir>            Folder of your own clips (.mp4/.mov/.webm/...), used in name order
@@ -115,7 +116,7 @@ async function main() {
   await mkdir(path.dirname(outputPath), { recursive: true });
 
   // 1) Voiceover
-  const { text, marked } = parseScript((await readScript(args.script)).trim());
+  const { text, marked, hints } = parseScript((await readScript(args.script)).trim());
   if (!text) throw new Error("Script is empty");
   console.log(`1/4 Generating voiceover (${text.length} chars)...`);
   if (!process.env.ELEVENLABS_API_KEY) {
@@ -181,6 +182,12 @@ async function main() {
       console.warn("    ! PIXABAY_API_KEY is not set; the search will likely be rejected.");
     }
     const segments = scriptSegments(captions, durationInFrames / fps);
+    // Attach [search terms] from the script to the sentence they sit in.
+    for (const hint of hints) {
+      const word = words[hint.word];
+      const seg = segments.find((s) => s.words.includes(word));
+      if (seg) seg.queries = [...(seg.queries ?? []), ...hint.queries];
+    }
     const stock = await fetchStockBroll(segments, {
       apiKey: process.env.PIXABAY_API_KEY,
       cacheDir: path.resolve("out/.cache/pixabay"),
