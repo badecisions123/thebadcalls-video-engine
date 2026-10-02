@@ -292,6 +292,44 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
   await mkdir(videosDir, { recursive: true });
   const used = new Set<number>();
   const clips: StockClip[] = [];
+  type Approved = { hit: PixabayHit; query: string };
+  // Clips the AI approved beyond what their sentence needed, per sentence.
+  const spares: Approved[][] = segments.map(() => []);
+  // Each sentence's searches and the clips already shown for it, so they can be continued.
+  const history: { seg: Segment; queries: string[]; seen: Set<number> }[] = [];
+
+  /**
+   * Shows the AI candidates from `queries` (skipping clips already used or
+   * already shown for this sentence), about 6 at a time, until it has approved
+   * at least `need` clips or MAX_ROUNDS rounds have run. Returns approvals, best first.
+   */
+  const aiRounds = async (judge: Segment, queries: string[], need: number, seen: Set<number>): Promise<Approved[]> => {
+    const approved: Approved[] = [];
+    const queryOf = new Map<number, string>();
+    let pool: PixabayHit[] = [];
+    let rounds = 0;
+    const review = async () => {
+      rounds++;
+      for (const hit of await opts.choose!(judge, pool)) {
+        if (!used.has(hit.id) && !approved.some((a) => a.hit.id === hit.id)) approved.push({ hit, query: queryOf.get(hit.id)! });
+      }
+      pool = [];
+    };
+    for (const query of queries) {
+      if (approved.length >= need || rounds >= MAX_ROUNDS) break;
+      const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query, true)
+        .filter((h) => !seen.has(h.id))
+        .slice(0, PER_QUERY);
+      for (const hit of hits) {
+        seen.add(hit.id);
+        queryOf.set(hit.id, query);
+        pool.push(hit);
+      }
+      if (pool.length >= CANDIDATES_PER_ROUND) await review();
+    }
+    if (pool.length && approved.length < need && rounds < MAX_ROUNDS) await review();
+    return approved;
+  };
   const scriptTerms = searchTerms(segments.flatMap((s) => s.words), 6);
 
   for (let si = 0; si < segments.length; si++) {
@@ -328,37 +366,32 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
         }
       }
     } else {
-      // Collect candidates from the best searches, let the AI pick, and move on to
-      // further searches only if it rejected everything it was shown.
-      const queryOf = new Map<number, string>();
-      const seen: PixabayHit[] = [];
-      let pool: PixabayHit[] = [];
-      let rounds = 0;
-      const review = async () => {
-        rounds++;
-        for (const hit of await opts.choose!(seg, pool)) {
-          if (picked.length >= want) break;
-          if (!used.has(hit.id)) await take(hit, queryOf.get(hit.id)!);
-        }
-        pool = [];
-      };
-      for (const query of queries) {
-        if (picked.length >= want || rounds >= MAX_ROUNDS) break;
-        const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query, true)
-          .filter((h) => !queryOf.has(h.id))
-          .slice(0, PER_QUERY);
-        for (const hit of hits) {
-          queryOf.set(hit.id, query);
-          seen.push(hit);
-          pool.push(hit);
-        }
-        if (pool.length >= CANDIDATES_PER_ROUND) await review();
+      const seen = new Set<number>();
+      history[si] = { seg, queries, seen };
+      const approved = await aiRounds(seg, queries, want, seen);
+      for (const a of approved) {
+        if (picked.length < want) await take(a.hit, a.query);
+        else spares[si].push(a);
       }
-      if (pool.length && picked.length < want && rounds < MAX_ROUNDS) await review();
-      // Don't fall back to footage the AI already rejected: the neighbouring
-      // sentence's footage carries on through this one instead (see mergeEmptySegments).
+      // Never fall back to footage the AI already rejected. Instead continue the
+      // previous sentence's scene: first with its spare approved clips, then with
+      // more rounds of its searches; failing that its footage runs on through this
+      // sentence (see mergeEmptySegments).
       if (!picked.length) {
-        opts.log?.(`    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> nothing fit (${seen.length} clips checked); the neighbouring footage carries on`);
+        const label = `    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> nothing fit (${seen.size} clips checked)`;
+        for (const a of spares[si - 1] ?? []) {
+          if (picked.length < want && !used.has(a.hit.id)) await take(a.hit, a.query);
+        }
+        const prev = history[si - 1];
+        if (picked.length < want && prev) {
+          for (const a of await aiRounds(prev.seg, prev.queries, want - picked.length, prev.seen)) await take(a.hit, a.query);
+        }
+        if (!picked.length) {
+          opts.log?.(`${label}; the neighbouring footage carries on`);
+          continue;
+        }
+        opts.log?.(`${label}; continuing the previous scene with ${picked.length} more clip(s)`);
+        clips.push(...picked);
         continue;
       }
     }

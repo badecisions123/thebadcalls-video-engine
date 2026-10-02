@@ -235,3 +235,75 @@ test("with an AI editor: rejected candidates lead to the next searches; nothing 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a sentence where nothing fits continues with the previous sentence's spare approved clips", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "stock-"));
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.hostname !== "pixabay.com") return new Response("video");
+    const q = url.searchParams.get("q")!;
+    const ids: Record<string, number[]> = { meeting: [1, 2, 3], laughing: [4, 5] };
+    const hits = (ids[q] ?? []).map((id) => hit(id, 1920, 1080, 10, `${q}, thing`));
+    return new Response(JSON.stringify({ total: hits.length, totalHits: hits.length, hits }));
+  }) as typeof fetch;
+  try {
+    const clips = await fetchStockBroll(
+      [
+        { text: "A meeting.", start: 0, end: 3, words: [w("meeting.", 0, 1)], aiQueries: ["meeting"] },
+        { text: "They laughed.", start: 3, end: 6, words: [w("laughed.", 3, 4)], aiQueries: ["laughing"] },
+      ],
+      {
+        cacheDir: dir,
+        fetchImpl: fakeFetch,
+        targetShot: 3,
+        maxPerSegment: 1,
+        minClipSeconds: 3,
+        fallbackTerms: [],
+        // Approves every meeting clip, rejects every laughing clip.
+        choose: async (_seg, candidates) => candidates.filter((c) => c.id <= 3),
+      },
+    );
+    assert.deepEqual(clips.map((c) => [c.segment, c.pixabayId, c.query]), [
+      [0, 1, "meeting"],
+      [1, 2, "meeting"], // a spare from sentence 0, not a rejected "laughing" clip
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("with no spares, an empty sentence gets new clips from more rounds of the previous sentence's searches", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "stock-"));
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.hostname !== "pixabay.com") return new Response("video");
+    const q = url.searchParams.get("q")!;
+    const ids: Record<string, number[]> = { meeting: [1, 2, 3, 4, 5, 6], laughing: [7, 8] };
+    const hits = (ids[q] ?? []).map((id) => hit(id, 1920, 1080, 10, `${q}, thing`));
+    return new Response(JSON.stringify({ total: hits.length, totalHits: hits.length, hits }));
+  }) as typeof fetch;
+  try {
+    const clips = await fetchStockBroll(
+      [
+        { text: "A meeting.", start: 0, end: 3, words: [w("meeting.", 0, 1)], aiQueries: ["meeting"] },
+        { text: "They laughed.", start: 3, end: 6, words: [w("laughed.", 3, 4)], aiQueries: ["laughing"] },
+      ],
+      {
+        cacheDir: dir,
+        fetchImpl: fakeFetch,
+        targetShot: 3,
+        maxPerSegment: 1,
+        minClipSeconds: 3,
+        fallbackTerms: [],
+        // For the meeting sentence, approves only the first clip shown each round; rejects all laughing clips.
+        choose: async (seg, candidates) => (seg.text === "A meeting." ? candidates.slice(0, 1) : []),
+      },
+    );
+    assert.deepEqual(clips.map((c) => [c.segment, c.pixabayId]), [
+      [0, 1],
+      [1, 4], // a fresh meeting clip, not one already shown (1-3) or rejected (7, 8)
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

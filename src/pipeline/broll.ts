@@ -46,9 +46,9 @@ export type PlanOptions = {
 
 export const DEFAULT_PLAN_OPTIONS: PlanOptions = {
   fps: 30,
-  minShot: 1.5,
-  targetShot: 3,
-  maxShot: 5,
+  minShot: 2,
+  targetShot: 4,
+  maxShot: 6,
 };
 
 /**

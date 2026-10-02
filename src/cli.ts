@@ -45,9 +45,9 @@ Options:
   --fps <n>                Frames per second (default: 30)
   --words <n>              Max words per caption (default: 3)
   --caption-style <name>   whip (one line, motion-blur in/out) or pop (word-by-word, bouncing keywords). Default: whip
-  --min-shot <sec>         Min B-roll shot length (default: 1.5)
-  --target-shot <sec>      Preferred B-roll shot length (default: 3)
-  --max-shot <sec>         Max B-roll shot length (default: 5)
+  --min-shot <sec>         Min B-roll shot length (default: 2)
+  --target-shot <sec>      Preferred B-roll shot length (default: 4)
+  --max-shot <sec>         Max B-roll shot length (default: 6)
   --tail <sec>             Extra time after the voiceover ends (default: 0.5)
   --no-auto-emphasis       Only emphasize *marked* words (skip auto-detected names, money, bad news)
   --no-motion              Turn off zooms, punch-ins and shake on the B-roll
@@ -90,9 +90,9 @@ async function main() {
       fps: { type: "string", default: "30" },
       words: { type: "string", default: "3" },
       "caption-style": { type: "string", default: "whip" },
-      "min-shot": { type: "string", default: "1.5" },
-      "target-shot": { type: "string", default: "3" },
-      "max-shot": { type: "string", default: "5" },
+      "min-shot": { type: "string", default: "2" },
+      "target-shot": { type: "string", default: "4" },
+      "max-shot": { type: "string", default: "6" },
       tail: { type: "string", default: "0.5" },
       "no-render": { type: "boolean", default: false },
       "no-auto-emphasis": { type: "boolean", default: false },

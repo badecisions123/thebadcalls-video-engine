@@ -114,7 +114,7 @@ npm run make -- --script examples/script.txt --broll ./my-broll    # your own cl
 | `--speed <n>` | `1` | Voice speed (0.7 to 1.2) |
 | `--words <n>` | `3` | Max words per caption |
 | `--caption-style <name>` | `whip` | `whip` or `pop` (see above) |
-| `--min-shot / --target-shot / --max-shot <sec>` | `1.5 / 3 / 5` | B-roll pacing |
+| `--min-shot / --target-shot / --max-shot <sec>` | `2 / 4 / 6` | B-roll pacing |
 | `--tail <sec>` | `0.5` | Time the video keeps running after the voice ends |
 | `--no-auto-emphasis` | | Only call out words marked with `*asterisks*` |
 | `--no-motion` | | Turn off the B-roll zooms, punch-ins and shake |
