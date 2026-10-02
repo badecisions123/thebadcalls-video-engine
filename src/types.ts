@@ -5,7 +5,7 @@
  * How a word is called out on screen:
  * - alert: bad news (bankrupt, fired, lawsuit...) in red
  * - money: numbers, money and percentages in green
- * - key:   names and anything marked *like this* in the script
+ * - key:   names, years and anything marked *like this* in the script (green)
  */
 export type Emphasis = "alert" | "money" | "key";
 
@@ -89,7 +89,7 @@ export const CAPTION_PRESETS = {
     strokeColor: "#000000",
     alertColor: "#F7090A",
     moneyColor: "#07F807",
-    keyColor: "#11F8F9",
+    keyColor: "#07F807",
     uppercase: true,
   },
   pop: {
@@ -101,7 +101,7 @@ export const CAPTION_PRESETS = {
     strokeColor: "#000000",
     alertColor: "#FF3B30",
     moneyColor: "#2EE86B",
-    keyColor: "#4FD8FF",
+    keyColor: "#2EE86B",
     uppercase: true,
   },
 } satisfies Record<CaptionStyle["animation"], CaptionStyle>;

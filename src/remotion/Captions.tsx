@@ -127,37 +127,58 @@ const PopPage: React.FC<{ page: CaptionPage; style: CaptionStyle }> = ({ page, s
 };
 
 /**
- * "whip" style: the whole caption on one line, keywords colored. It snaps in
- * with a horizontal stretch and motion blur, then squashes out the same way.
- * Timings were measured frame by frame from the reference clip (30 fps).
+ * "whip" style, replicating a CapCut caption: the whole caption on one line,
+ * keywords colored. It snaps in from a wide horizontal stretch with heavy
+ * sideways motion blur and leaves the same way in reverse. Values were
+ * measured frame by frame from the reference clip (30 fps).
  */
+const WHIP_FRAMES = 5;
+// Per frame of the transition, from "fully in motion" (index 0) to "at rest".
+const WHIP_SCALE = [1.4, 1.25, 1.12, 1.05, 1.02, 1];
+const WHIP_BLUR = [26, 16, 9, 4, 1.5, 0];
+const WHIP_OPACITY = [0.92, 1, 1, 1, 1, 1];
+
 const WhipPage: React.FC<{ page: CaptionPage; style: CaptionStyle; id: string }> = ({ page, style, id }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const total = Math.round((page.end - page.start) * fps);
-  const left = total - frame; // frames until this caption is gone
+  const total = Math.max(1, Math.round((page.end - page.start) * fps));
 
+  // Short captions get a shorter transition so they still settle for a moment.
+  const n = Math.max(2, Math.min(WHIP_FRAMES, Math.floor(total / 3)));
+  const steps = WHIP_SCALE.map((_, i) => (i * n) / WHIP_FRAMES);
+  // Distance (in frames) from the nearest edge of the caption's time on screen.
+  const t = Math.min(frame, total - 1 - frame);
   const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
-  let scaleX = interpolate(frame, [0, 1, 2, 4], [0.7, 1.12, 1.05, 1], clamp);
-  let blur = interpolate(frame, [0, 1, 2, 4], [30, 18, 8, 0], clamp);
-  let opacity = interpolate(frame, [0, 1], [0.45, 1], clamp);
-  if (left <= 4) {
-    scaleX = interpolate(left, [0, 1, 2, 4], [0.45, 0.75, 0.9, 1], clamp);
-    blur = interpolate(left, [0, 1, 2, 4], [30, 20, 10, 0], clamp);
-    opacity = interpolate(left, [0, 2, 4], [0.3, 0.8, 1], clamp);
-  }
+  const scaleX = interpolate(t, steps, WHIP_SCALE, clamp);
+  const blur = interpolate(t, steps, WHIP_BLUR, clamp);
+  const opacity = interpolate(t, steps, WHIP_OPACITY, clamp);
 
   // Keep it on one line: shrink long captions to fit (Montserrat Black caps average ~0.68em wide).
   const chars = page.words.reduce((n, w) => n + w.text.length + 1, -1);
   const fontSize = Math.min(style.fontSize, (0.9 * VIDEO_WIDTH) / (Math.max(1, chars) * 0.68));
-  // A soft dark halo rather than a hard outline, as in the reference.
-  const shadow = "0 0 6px rgba(0,0,0,0.95), 0 0 14px rgba(0,0,0,0.75), 0 4px 18px rgba(0,0,0,0.6)";
+
+  const text = (shadow: boolean) =>
+    page.words.map((w, i) => (
+      <span key={i} style={{ color: shadow ? style.strokeColor : w.emphasis ? toneColor(style, w.emphasis) : style.color }}>
+        {w.text}
+        {i < page.words.length - 1 ? " " : ""}
+      </span>
+    ));
+
+  const layer: React.CSSProperties = {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    textAlign: "center",
+    whiteSpace: "nowrap",
+  };
 
   return (
     <AbsoluteFill>
       <svg width="0" height="0" style={{ position: "absolute" }}>
-        <filter id={id} x="-50%" y="-20%" width="200%" height="140%">
-          <feGaussianBlur stdDeviation={`${blur} 0`} />
+        <filter id={id} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation={`${blur} ${blur * 0.08}`} />
         </filter>
       </svg>
       <div
@@ -166,35 +187,35 @@ const WhipPage: React.FC<{ page: CaptionPage; style: CaptionStyle; id: string }>
           top: `${style.position * 100}%`,
           left: 0,
           right: 0,
-          transform: `translateY(-50%) scaleX(${scaleX})`,
-          filter: blur > 0.5 ? `url(#${id})` : undefined,
+          height: fontSize,
+          marginTop: -fontSize / 2,
+          transform: `scaleX(${scaleX})`,
+          filter: blur > 0.3 ? `url(#${id})` : undefined,
           opacity,
-          textAlign: "center",
-          whiteSpace: "nowrap",
           fontFamily: `'${CAPTION_FONT}', 'Arial Black', sans-serif`,
           fontWeight: 900,
           fontSize,
           lineHeight: 1,
           textTransform: style.uppercase ? "uppercase" : "none",
-          WebkitTextStroke: `${Math.max(1, Math.round(fontSize / 24))}px ${style.strokeColor}`,
-          paintOrder: "stroke fill",
         }}
       >
-        {page.words.map((w, i) => {
-          const color = w.emphasis ? toneColor(style, w.emphasis) : style.color;
-          return (
-            <span
-              key={i}
-              style={{
-                color,
-                textShadow: w.emphasis ? `${shadow}, 0 0 12px ${color}55` : shadow,
-              }}
-            >
-              {w.text}
-              {i < page.words.length - 1 ? " " : ""}
-            </span>
-          );
-        })}
+        {/*
+          CapCut-style shadow: a thickened, blurred black copy of the text sitting
+          slightly low. Measured on the reference: ~9px of blur, ~3px down, and
+          60-80% darkening right at the letter edges, with no hard outline.
+        */}
+        <div
+          style={{
+            ...layer,
+            transform: `translateY(${fontSize * 0.04}px)`,
+            WebkitTextStroke: `${fontSize * 0.14}px ${style.strokeColor}`,
+            filter: `blur(${fontSize * 0.12}px)`,
+            opacity: 1,
+          }}
+        >
+          {text(true)}
+        </div>
+        <div style={layer}>{text(false)}</div>
       </div>
     </AbsoluteFill>
   );

@@ -11,8 +11,8 @@ Turns a text script and a folder of B-roll into a finished vertical (1080×1920)
 
 Pick one with `--caption-style`:
 
-- **`whip`** (default): matches the reference clip, measured frame by frame. The whole caption appears on one line at about 78% of the way down, in Montserrat Black with a soft dark halo. Keywords are colored. Each caption snaps in with a horizontal stretch and motion blur over 4 frames and squashes out the same way.
-- **`pop`**: words pop in as they're spoken and the current word turns yellow. Keywords get their own line, larger, with a bounce and glow.
+- **`whip`** (default): copies a CapCut caption, measured frame by frame from a reference clip. The whole caption appears on one line about 78% of the way down, in Montserrat Black, with keywords in green or red. The shadow is a thickened, blurred black copy of the text sitting slightly low, with no hard outline. Each caption snaps in from a wide horizontal stretch with heavy sideways motion blur over about 5 frames, and stretches back out the same way when it leaves.
+- **`pop`**: words pop in as they're spoken and the current word turns yellow. Keywords get their own line, larger, with a bounce and glow. The bottom of the frame is darkened slightly behind the captions.
 
 Montserrat is bundled (`@fontsource/montserrat`), so captions look the same on every machine. The presets live in `CAPTION_PRESETS` in `src/types.ts`.
 
@@ -24,7 +24,7 @@ Some words are colored to call them out. In the `pop` style they're also larger,
 |---|---|---|
 | alert | red, and the footage shakes | bad news: *bankrupt*, *fired*, *lawsuit*, *collapsed*, *lost*... (list in `src/pipeline/emphasis.ts`) |
 | money | green | amounts, numbers and percentages: *$50*, *million*, *40%* |
-| key | cyan | names (capitalized words mid-sentence, first mention only) and years |
+| key | green | names (capitalized words mid-sentence, first mention only) and years |
 
 To force a callout, wrap the words in asterisks in your script: `*Toys R Us* filed for *bankruptcy*`. The asterisks are removed before the script goes to ElevenLabs, and a marked word keeps its tone (so `*bankruptcy*` is still red). Use `--no-auto-emphasis` to call out only the words you've marked.
 
