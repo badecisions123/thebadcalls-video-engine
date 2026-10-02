@@ -7,13 +7,22 @@ Turns a text script and a folder of B-roll into a finished vertical (1080×1920)
 3. **B-roll**: takes the clips in the folder in name order (`clip2` comes before `clip10`) and repeats them if the voiceover runs longer. Each cut lands on a sentence or clause break when one falls inside the allowed shot length.
 4. **Render**: Remotion lays the shots out back to back, crops them to fill 9:16, adds motion, captions, a progress bar and the voiceover, and renders an H.264 MP4.
 
+## Caption styles
+
+Pick one with `--caption-style`:
+
+- **`whip`** (default): matches the reference clip, measured frame by frame. The whole caption appears on one line at about 78% of the way down, in Montserrat Black with a soft dark halo. Keywords are colored. Each caption snaps in with a horizontal stretch and motion blur over 4 frames and squashes out the same way.
+- **`pop`**: words pop in as they're spoken and the current word turns yellow. Keywords get their own line, larger, with a bounce and glow.
+
+Montserrat is bundled (`@fontsource/montserrat`), so captions look the same on every machine. The presets live in `CAPTION_PRESETS` in `src/types.ts`.
+
 ## Emphasized words
 
-Some words are made bigger and colored, and get their own line. When one is spoken, it lands with a bounce and the footage punches in:
+Some words are colored to call them out. In the `pop` style they're also larger, get their own line and bounce in. In both styles the footage punches in when one is spoken:
 
 | Tone | Color | Picked automatically for |
 |---|---|---|
-| alert | red, and the frame shakes | bad news: *bankrupt*, *fired*, *lawsuit*, *collapsed*, *lost*... (list in `src/pipeline/emphasis.ts`) |
+| alert | red, and the footage shakes | bad news: *bankrupt*, *fired*, *lawsuit*, *collapsed*, *lost*... (list in `src/pipeline/emphasis.ts`) |
 | money | green | amounts, numbers and percentages: *$50*, *million*, *40%* |
 | key | cyan | names (capitalized words mid-sentence, first mention only) and years |
 
@@ -45,6 +54,7 @@ npm run make -- --script examples/script.txt --broll ./my-broll --out out/video.
 | `--model <id>` | `eleven_multilingual_v2` | ElevenLabs model |
 | `--speed <n>` | `1` | Voice speed (0.7 to 1.2) |
 | `--words <n>` | `3` | Max words per caption |
+| `--caption-style <name>` | `whip` | `whip` or `pop` (see above) |
 | `--min-shot / --target-shot / --max-shot <sec>` | `1.5 / 3 / 5` | B-roll pacing |
 | `--tail <sec>` | `0.5` | Time the video keeps running after the voice ends |
 | `--no-auto-emphasis` | | Only call out words marked with `*asterisks*` |
@@ -75,7 +85,8 @@ src/
     Root.tsx             # 1080x1920 composition; duration comes from props
     VerticalVideo.tsx    # B-roll, legibility gradient, captions, progress bar, audio
     BRollTrack.tsx       # cover-cropped shots with zoom drift, cut zoom, punch-in and shake
-    Captions.tsx         # words pop in as spoken, emphasized words bounce and glow
+    Captions.tsx         # "whip" and "pop" caption animations
+    fonts.ts             # loads the bundled Montserrat Black before rendering
 ```
 
 `npm test` runs the unit tests and `npm run typecheck` runs `tsc`.
@@ -85,5 +96,4 @@ src/
 - ElevenLabs caps the length of a single request (about 5,000 to 10,000 characters depending on the model). Longer scripts will need to be split into chunks and joined.
 - B-roll is played in folder order. Matching clips to the script by keyword or tag would be a natural next step.
 - No background music or sound effects yet. A whoosh or hit under emphasized words would add a lot, and ElevenLabs' sound-effects API could generate them once and reuse them.
-- The caption font falls back to Arial Black unless Montserrat is installed. Bundling a font (for example with `@remotion/google-fonts`) would make it look the same on every machine.
 - Remotion is free for individuals and small teams. Larger companies need a [company license](https://www.remotion.dev/license).

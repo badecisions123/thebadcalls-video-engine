@@ -38,6 +38,12 @@ export type Shot = {
 };
 
 export type CaptionStyle = {
+  /**
+   * - whip: whole caption at once, one line, keywords colored; enters and exits
+   *   with a horizontal stretch and motion blur
+   * - pop:  words pop in as spoken; keywords get their own bigger, bouncing line
+   */
+  animation: "whip" | "pop";
   /** Vertical position of the caption block's center, 0 (top) .. 1 (bottom). */
   position: number;
   fontSize: number;
@@ -73,17 +79,34 @@ export const VIDEO_WIDTH = 1080;
 export const VIDEO_HEIGHT = 1920;
 export const COMPOSITION_ID = "VerticalVideo";
 
-export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
-  position: 0.68,
-  fontSize: 92,
-  color: "#FFFFFF",
-  highlightColor: "#FFD400",
-  strokeColor: "#000000",
-  alertColor: "#FF3B30",
-  moneyColor: "#2EE86B",
-  keyColor: "#4FD8FF",
-  uppercase: true,
-};
+export const CAPTION_PRESETS = {
+  whip: {
+    animation: "whip",
+    position: 0.778,
+    fontSize: 72,
+    color: "#FFFFFF",
+    highlightColor: "#07F807",
+    strokeColor: "#000000",
+    alertColor: "#F7090A",
+    moneyColor: "#07F807",
+    keyColor: "#11F8F9",
+    uppercase: true,
+  },
+  pop: {
+    animation: "pop",
+    position: 0.68,
+    fontSize: 92,
+    color: "#FFFFFF",
+    highlightColor: "#FFD400",
+    strokeColor: "#000000",
+    alertColor: "#FF3B30",
+    moneyColor: "#2EE86B",
+    keyColor: "#4FD8FF",
+    uppercase: true,
+  },
+} satisfies Record<CaptionStyle["animation"], CaptionStyle>;
+
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = CAPTION_PRESETS.whip;
 
 export const DEFAULT_EFFECTS: Effects = {
   kenBurns: true,

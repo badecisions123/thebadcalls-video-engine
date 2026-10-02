@@ -8,7 +8,7 @@ import { alignmentToWords, buildCaptionPages, sentenceBoundaries, toSrt } from "
 import { applyEmphasis, parseScript } from "./pipeline/emphasis";
 import { renderVideo } from "./pipeline/render";
 import { generateVoiceover } from "./pipeline/voiceover";
-import { DEFAULT_CAPTION_STYLE, DEFAULT_EFFECTS, type VideoProps } from "./types";
+import { CAPTION_PRESETS, DEFAULT_EFFECTS, type VideoProps } from "./types";
 
 // "Christopher - Gentle and Trustworthy" (calm, middle-aged British narrator).
 const DEFAULT_VOICE_ID = "G17SuINrv2H9FC6nvetn";
@@ -28,6 +28,7 @@ Options:
   --speed <n>              Voice speed, 0.7-1.2 (default: 1)
   --fps <n>                Frames per second (default: 30)
   --words <n>              Max words per caption (default: 3)
+  --caption-style <name>   whip (one line, motion-blur in/out) or pop (word-by-word, bouncing keywords). Default: whip
   --min-shot <sec>         Min B-roll shot length (default: 1.5)
   --target-shot <sec>      Preferred B-roll shot length (default: 3)
   --max-shot <sec>         Max B-roll shot length (default: 5)
@@ -72,6 +73,7 @@ async function main() {
       speed: { type: "string" },
       fps: { type: "string", default: "30" },
       words: { type: "string", default: "3" },
+      "caption-style": { type: "string", default: "whip" },
       "min-shot": { type: "string", default: "1.5" },
       "target-shot": { type: "string", default: "3" },
       "max-shot": { type: "string", default: "5" },
@@ -91,6 +93,10 @@ async function main() {
   }
 
   const fps = Number(args.fps);
+  const captionStyle = CAPTION_PRESETS[args["caption-style"] as keyof typeof CAPTION_PRESETS];
+  if (!captionStyle) {
+    throw new Error(`Unknown --caption-style "${args["caption-style"]}" (use ${Object.keys(CAPTION_PRESETS).join(" or ")})`);
+  }
   const name = args.script === "-" ? "video" : path.basename(args.script, path.extname(args.script));
   const outputPath = path.resolve(args.out ?? `out/${name}.mp4`);
   const workDir = path.resolve("out/.work", name);
@@ -159,7 +165,7 @@ async function main() {
     audioSrc: "voiceover.mp3",
     shots,
     captions,
-    captionStyle: DEFAULT_CAPTION_STYLE,
+    captionStyle,
     effects: {
       kenBurns: DEFAULT_EFFECTS.kenBurns && !args["no-motion"],
       punchIn: DEFAULT_EFFECTS.punchIn && !args["no-motion"],
