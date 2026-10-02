@@ -54,9 +54,9 @@ When you leave out `--broll`, the pipeline finds and downloads clips itself:
 Tags alone pick a lot of unrelated footage. With an AI editor configured, two things change:
 
 1. **It writes the searches.** The AI reads the whole script once and writes 3 searches per sentence, describing what should be on screen. For example, "Blockbuster laughed them out of the room" becomes `executives laughing`, `boardroom meeting`. It never searches brand names, because stock sites don't have them.
-2. **It checks the clips.** For each sentence, about 6 candidates are gathered and the AI looks at each one's preview image, keeping only those that actually fit. If it rejects all of them, it tries the next searches, up to 3 rounds. If nothing fits even then, the best tag match is used, so a sentence is never left empty.
+2. **It checks the clips.** For each sentence, about 6 candidates are gathered. The AI looks at 3 frames from the part of each clip that will actually play, keeping only the ones that fit and rejecting blurry or empty shots. Pixabay's single preview image often comes from a different moment in the clip, which is why frames are used instead. The frames are taken from each clip's smallest version with Remotion's built-in ffmpeg, so nothing extra needs installing. If the AI rejects every candidate, it tries the next searches, up to 3 rounds. If nothing fits even then, the previous sentence's footage keeps playing through that sentence rather than using a rejected clip.
 
-Your `[search terms]` still go first. If the AI isn't configured or a request fails, the pipeline warns you and falls back to tag-based picking, so the video still renders. AI replies are cached in `out/.cache/ai/`, so re-renders don't repeat calls. Use `--no-ai` to switch it off for one run.
+Your `[search terms]` still go first. Busy-server errors from the AI are retried twice. If the AI isn't configured or a request still fails, the pipeline warns you and falls back to tag-based picking, so the video still renders. AI replies are cached in `out/.cache/ai/`, so re-renders don't repeat calls. Use `--no-ai` to switch it off for one run.
 
 Any OpenAI-compatible chat server works. Set one of these:
 
@@ -141,6 +141,7 @@ src/
     broll.ts             # clip discovery, planShots() and per-sentence planSegmentedShots()
     stock.ts             # sentences, keywords, Pixabay search, download and cache
     ai.ts                # AI editor: writes searches, checks clip previews (any OpenAI-compatible API)
+    frames.ts            # preview frames from candidate clips via Remotion's bundled ffmpeg
     render.ts            # Remotion bundle, selectComposition and renderMedia
   remotion/
     Root.tsx             # 1080x1920 composition; duration comes from props

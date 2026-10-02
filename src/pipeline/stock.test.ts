@@ -178,7 +178,7 @@ test("fetchStockBroll queries per segment, falls back, dedupes and downloads", a
   }
 });
 
-test("with an AI editor: rejected candidates lead to the next searches, and an all-reject falls back", async () => {
+test("with an AI editor: rejected candidates lead to the next searches; nothing fitting leaves a sentence empty", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "stock-"));
   const fakeFetch = (async (input: string | URL | Request) => {
     const url = new URL(String(input));
@@ -212,12 +212,25 @@ test("with an AI editor: rejected candidates lead to the next searches, and an a
     assert.deepEqual(shown, [[1, 2, 3, 4, 5, 6]]);
     assert.deepEqual(clips.map((c) => [c.pixabayId, c.query]), [[5, "vhs"]]);
 
-    // The AI rejects everything: the best tag match is used rather than leaving the sentence empty.
-    const fallback = await fetchStockBroll(
-      [{ text: "An office.", start: 0, end: 3, words: [w("office.", 0, 1)], aiQueries: ["office"] }],
-      { ...opts, choose: async () => [] },
+    // A sentence where the AI rejects everything gets no clips (its neighbour's footage carries on),
+    // rather than footage the AI already said doesn't fit.
+    const partial = await fetchStockBroll(
+      [
+        { text: "An office.", start: 0, end: 3, words: [w("office.", 0, 1)], aiQueries: ["office"] },
+        { text: "A shop.", start: 3, end: 6, words: [w("shop.", 3, 4)], aiQueries: ["vhs"] },
+      ],
+      { ...opts, choose: async (_seg, candidates) => candidates.filter((c) => c.id !== 7) },
     );
-    assert.deepEqual(fallback.map((c) => c.pixabayId), [7]);
+    assert.deepEqual(partial.map((c) => [c.segment, c.pixabayId]), [[1, 4]]);
+
+    // If nothing fits anywhere, it says so instead of rendering a video with no footage.
+    await assert.rejects(
+      fetchStockBroll([{ text: "An office.", start: 0, end: 3, words: [w("office.", 0, 1)], aiQueries: ["office"] }], {
+        ...opts,
+        choose: async () => [],
+      }),
+      /No Pixabay clips fit any sentence/,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

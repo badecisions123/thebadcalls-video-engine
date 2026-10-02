@@ -5,3 +5,4 @@ out/
 *.mov
 *.mp3
 !examples/**/*.mp4
+!src/**/__fixtures__/*.mp4

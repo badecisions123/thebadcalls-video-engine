@@ -140,3 +140,22 @@ export function planSegmentedShots(
   });
   return shots;
 }
+
+/**
+ * Hands the time of segments that have no clips to a neighbour: to the
+ * previous segment, or to the next one for a leading empty segment.
+ */
+export function mergeEmptySegments(segments: SegmentPlan[]): SegmentPlan[] {
+  const out: SegmentPlan[] = [];
+  let pendingStart: number | undefined;
+  for (const seg of segments) {
+    if (!seg.clips.length) {
+      if (out.length) out[out.length - 1] = { ...out[out.length - 1], end: seg.end };
+      else pendingStart ??= seg.start;
+      continue;
+    }
+    out.push(pendingStart === undefined ? seg : { ...seg, start: pendingStart });
+    pendingStart = undefined;
+  }
+  return out;
+}

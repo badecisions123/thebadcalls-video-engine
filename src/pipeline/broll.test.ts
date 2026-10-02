@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planSegmentedShots, planShots } from "./broll";
+import { mergeEmptySegments, planSegmentedShots, planShots } from "./broll";
 
 const fps = 30;
 
@@ -62,4 +62,15 @@ test("segmented plan keeps each segment's clips inside its time span", () => {
   }
   // The last segment stretches to the end of the video.
   assert.ok(shots[shots.length - 1].src.startsWith("b"));
+});
+
+test("segments without clips hand their time to a neighbour", () => {
+  const c = [{ src: "x.mp4", durationInSeconds: 5 }];
+  const merged = mergeEmptySegments([
+    { start: 0, end: 2, clips: [] },
+    { start: 2, end: 5, clips: c },
+    { start: 5, end: 8, clips: [] },
+    { start: 8, end: 10, clips: c },
+  ]);
+  assert.deepEqual(merged.map((s) => [s.start, s.end]), [[0, 8], [8, 10]]);
 });

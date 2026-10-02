@@ -318,7 +318,6 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
       used.add(hit.id);
       picked.push({ segment: si, file, query, pixabayId: hit.id, pageURL: hit.pageURL });
     };
-    let note = "";
 
     if (!opts.choose) {
       for (const query of queries) {
@@ -356,21 +355,20 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
         if (pool.length >= CANDIDATES_PER_ROUND) await review();
       }
       if (pool.length && picked.length < want && rounds < MAX_ROUNDS) await review();
-      // Better a weak clip than an empty sentence: fall back to the best tag match.
+      // Don't fall back to footage the AI already rejected: the neighbouring
+      // sentence's footage carries on through this one instead (see mergeEmptySegments).
       if (!picked.length) {
-        const fallback = seen.find((h) => !used.has(h.id));
-        if (fallback) {
-          await take(fallback, queryOf.get(fallback.id)!);
-          note = " [AI rejected every candidate; using the best tag match]";
-        }
+        opts.log?.(`    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> nothing fit (${seen.length} clips checked); the neighbouring footage carries on`);
+        continue;
       }
     }
 
     if (!picked.length) throw new Error(`No Pixabay clips found for "${seg.text}" (tried: ${queries.join(", ")})`);
     opts.log?.(
-      `    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> ${[...new Set(picked.map((p) => p.query))].join(", ")} (${picked.length})${note}`,
+      `    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> ${[...new Set(picked.map((p) => p.query))].join(", ")} (${picked.length})`,
     );
     clips.push(...picked);
   }
+  if (!clips.length) throw new Error("No Pixabay clips fit any sentence; try adding [search terms] to the script or use --broll");
   return clips;
 }

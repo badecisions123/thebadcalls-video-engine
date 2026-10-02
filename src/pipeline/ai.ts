@@ -45,6 +45,8 @@ export function aiConfigFromEnv(env: NodeJS.ProcessEnv): AiConfig | undefined {
 type Content = string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
 type Message = { role: "system" | "user"; content: Content };
 
+export const RETRY_DELAYS_MS = [2000, 6000];
+
 /** Sends a chat request and returns the reply text. Replies are cached on disk by request. */
 export async function chat(config: AiConfig, messages: Message[]): Promise<string> {
   const body = JSON.stringify({ model: config.model, messages, temperature: 0.2 });
@@ -55,7 +57,13 @@ export async function chat(config: AiConfig, messages: Message[]): Promise<strin
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-  const res = await (config.fetchImpl ?? fetch)(`${config.baseUrl}/chat/completions`, { method: "POST", headers, body });
+  // Free tiers and busy servers often answer "try again" (429/5xx): retry a couple of times.
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await (config.fetchImpl ?? fetch)(`${config.baseUrl}/chat/completions`, { method: "POST", headers, body });
+    if (res.ok || attempt >= RETRY_DELAYS_MS.length || !(res.status === 429 || res.status >= 500)) break;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`AI request to ${config.baseUrl} failed (${res.status} ${res.statusText}): ${detail.slice(0, 300)}`);
@@ -90,6 +98,8 @@ Rules for queries:
 - Never use brand, company or person names (stock libraries don't have them): show the idea instead
   (a video rental chain -> "video rental store", "vhs tapes"; a streaming service -> "watching tv", "laptop streaming").
 - Avoid abstract words ("success", "lesson", "threat") unless paired with something visible.
+- Prefer literal scenes from the story's world (offices, stores, people, screens, money) over visual
+  metaphors and clichés (chess boards, puzzles, light bulbs, dominoes, mazes) unless the narration mentions them.
 - Keep the whole video visually coherent: it tells one story.
 
 Reply with JSON only, in this exact shape:
@@ -116,9 +126,11 @@ export async function suggestQueries(config: AiConfig, sentences: string[]): Pro
 }
 
 const PICK_PROMPT = `You are a video editor choosing background footage for a vertical short-form video.
-You'll see one narration sentence and several numbered preview frames of candidate stock clips.
+You'll see one narration sentence and several numbered candidate stock clips. Each clip is shown as a
+few frames, in order, from the part that will actually play on screen.
 Choose the clips that fit as footage shown while that sentence is narrated: on-topic, believable, and not distracting.
-Reject anything off-topic, cartoonish, low quality, or showing readable text/logos that contradict the story.
+Reject anything off-topic, cartoonish, blurry or out of focus, low quality, mostly empty floor/sky/wall,
+or showing readable text/logos that contradict the story.
 
 Reply with JSON only: {"good": [indexes of fitting clips, best first]} — an empty list if none fit.`;
 
@@ -131,27 +143,42 @@ function thumbnailUrl(hit: PixabayHit): string | undefined {
   return undefined;
 }
 
+/** Pixabay's single preview image for a hit, as a data URL. */
+async function thumbnailPreview(hit: PixabayHit, doFetch: typeof fetch): Promise<string | undefined> {
+  const url = thumbnailUrl(hit);
+  if (!url) return undefined;
+  const res = await doFetch(url).catch(() => undefined);
+  if (!res?.ok) return undefined;
+  const type = res.headers.get("content-type") ?? "image/jpeg";
+  return `data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
+}
+
 /**
- * Shows the model each candidate's preview frame and returns the ones it says
- * fit the sentence, best first. Candidates without a preview are dropped.
+ * Shows the model each candidate and returns the ones it says fit the
+ * sentence, best first. `preview` supplies images per clip (ideally frames
+ * from the part that will play); Pixabay's single thumbnail is the fallback.
+ * Candidates without any image are dropped.
  */
-export async function pickClips(config: AiConfig, sentence: string, hits: PixabayHit[]): Promise<PixabayHit[]> {
+export async function pickClips(
+  config: AiConfig,
+  sentence: string,
+  hits: PixabayHit[],
+  preview?: (hit: PixabayHit) => Promise<string[] | undefined>,
+): Promise<PixabayHit[]> {
   const doFetch = config.fetchImpl ?? fetch;
-  const withImages: { hit: PixabayHit; dataUrl: string }[] = [];
+  const withImages: { hit: PixabayHit; images: string[] }[] = [];
   for (const hit of hits) {
-    const url = thumbnailUrl(hit);
-    if (!url) continue;
-    const res = await doFetch(url).catch(() => undefined);
-    if (!res?.ok) continue;
-    const type = res.headers.get("content-type") ?? "image/jpeg";
-    withImages.push({ hit, dataUrl: `data:${type};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}` });
+    const frames = await preview?.(hit);
+    const thumb = frames?.length ? undefined : await thumbnailPreview(hit, doFetch);
+    const images = frames?.length ? frames : thumb ? [thumb] : [];
+    if (images.length) withImages.push({ hit, images });
   }
   if (!withImages.length) return [];
 
   const content: Content = [{ type: "text", text: `Sentence: "${sentence}"` }];
-  withImages.forEach(({ dataUrl }, i) => {
+  withImages.forEach(({ images }, i) => {
     content.push({ type: "text", text: `Clip ${i}:` });
-    content.push({ type: "image_url", image_url: { url: dataUrl } });
+    for (const url of images) content.push({ type: "image_url", image_url: { url } });
   });
   const reply = await chat(config, [
     { role: "system", content: PICK_PROMPT },

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { type AiConfig, aiConfigFromEnv, parseJsonReply, pickClips, suggestQueries } from "./ai";
+import { type AiConfig, aiConfigFromEnv, parseJsonReply, pickClips, RETRY_DELAYS_MS, suggestQueries } from "./ai";
 import type { PixabayHit } from "./stock";
 
 const hit = (id: number): PixabayHit => ({
@@ -77,4 +77,18 @@ test("replies are cached so re-renders don't repeat AI calls", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("busy-server errors are retried", async () => {
+  RETRY_DELAYS_MS.splice(0, RETRY_DELAYS_MS.length, 1, 1);
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return calls < 3
+      ? new Response("busy", { status: 503 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: '{"sentences": [{"i": 0, "queries": ["office"]}]}' } }] }));
+  }) as typeof fetch;
+  const out = await suggestQueries({ baseUrl: "http://ai", model: "m", vision: false, fetchImpl }, ["Work."]);
+  assert.deepEqual(out, [["office"]]);
+  assert.equal(calls, 3);
 });

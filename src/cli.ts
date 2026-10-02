@@ -4,7 +4,8 @@ import { copyFile, link, mkdir, readFile, rm, writeFile } from "node:fs/promises
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { aiConfigFromEnv, pickClips, suggestQueries } from "./pipeline/ai";
-import { listClips, measureClips, planSegmentedShots, planShots, type SourceClip } from "./pipeline/broll";
+import { clipPreview } from "./pipeline/frames";
+import { listClips, measureClips, mergeEmptySegments, planSegmentedShots, planShots, type SourceClip } from "./pipeline/broll";
 import { alignmentToWords, buildCaptionPages, sentenceBoundaries, toSrt } from "./pipeline/captions";
 import { applyEmphasis, parseScript } from "./pipeline/emphasis";
 import { renderVideo } from "./pipeline/render";
@@ -196,6 +197,7 @@ async function main() {
       if (seg) seg.queries = [...(seg.queries ?? []), ...hint.queries];
     }
 
+    const pixabayCache = path.resolve("out/.cache/pixabay");
     const ai = args["no-ai"] ? undefined : aiConfigFromEnv(process.env);
     let choose: Parameters<typeof fetchStockBroll>[1]["choose"];
     if (ai) {
@@ -210,7 +212,7 @@ async function main() {
       if (ai.vision) {
         choose = async (seg, candidates) => {
           try {
-            return await pickClips(ai, seg.text, candidates);
+            return await pickClips(ai, seg.text, candidates, (hit) => clipPreview(hit, pixabayCache));
           } catch (err) {
             console.warn(`    ! AI clip check failed, using tag order: ${err instanceof Error ? err.message : err}`);
             return candidates;
@@ -221,7 +223,7 @@ async function main() {
     const stock = await fetchStockBroll(segments, {
       choose,
       apiKey: process.env.PIXABAY_API_KEY,
-      cacheDir: path.resolve("out/.cache/pixabay"),
+      cacheDir: pixabayCache,
       targetShot: planOptions.targetShot,
       maxPerSegment: Math.max(1, Number(args["stock-per-sentence"])),
       minClipSeconds: planOptions.minShot,
@@ -231,11 +233,10 @@ async function main() {
     const staged = await stageClips(await measureClips(stock.map((c) => c.file)));
     const segmentOf = new Map(stock.map((c) => [path.resolve(c.file), c.segment]));
     shots = planSegmentedShots(
-      segments.map((seg, i) => {
-        // A clip that failed to load leaves its sentence empty; borrow from the others then.
-        const own = staged.filter((c) => segmentOf.get(c.file) === i);
-        return { start: seg.start, end: seg.end, clips: own.length ? own : staged };
-      }),
+      // A sentence with no clips (nothing fit, or a download failed) continues its neighbour's footage.
+      mergeEmptySegments(
+        segments.map((seg, i) => ({ start: seg.start, end: seg.end, clips: staged.filter((c) => segmentOf.get(c.file) === i) })),
+      ),
       durationInFrames,
       cutPoints,
       planOptions,
