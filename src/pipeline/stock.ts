@@ -17,6 +17,8 @@ export type Segment = {
   words: Word[];
   /** Searches written in the script as `[video rental store]`, tried before anything else. */
   queries?: string[];
+  /** Searches suggested by the AI editor, tried next. */
+  aiQueries?: string[];
 };
 
 const SENTENCE_END = /[.!?…]["')\]]*$/;
@@ -118,7 +120,7 @@ export function searchTerms(words: Word[], max = 4): string[] {
 
 const PIXABAY_VIDEOS_URL = "https://pixabay.com/api/videos/";
 
-type Rendition = { url: string; width: number; height: number; size: number };
+type Rendition = { url: string; width: number; height: number; size: number; thumbnail?: string };
 
 export type PixabayHit = {
   id: number;
@@ -193,7 +195,7 @@ const RELEVANT_TAG_POSITIONS = 8;
  * query must match (so "watching tv" doesn't take a "bird watching" clip);
  * longer queries may miss one word. A tag containing the whole phrase counts as all words.
  */
-function tagMatch(hit: PixabayHit, query: string): [number, number] {
+function tagMatch(hit: PixabayHit, query: string, loose = false): [number, number] {
   const tags = hit.tags.toLowerCase().split(/\s*,\s*/).slice(0, RELEVANT_TAG_POSITIONS);
   const phrase = query.toLowerCase().trim();
   const terms = phrase.split(/\s+/).filter((t) => t.length > 1);
@@ -209,7 +211,7 @@ function tagMatch(hit: PixabayHit, query: string): [number, number] {
       positions += at;
     }
   }
-  const needed = terms.length <= 2 ? terms.length : terms.length - 1;
+  const needed = loose ? 1 : terms.length <= 2 ? terms.length : terms.length - 1;
   return matched >= needed ? [matched, positions] : [0, 0];
 }
 
@@ -218,9 +220,16 @@ function tagMatch(hit: PixabayHit, query: string): [number, number] {
  * and actually about the query (a query word among their first tags). Ranks by
  * how many query words match, then portrait first (no crop), then Pixabay's order.
  */
-export function rankHits(hits: PixabayHit[], minSeconds: number, exclude: Set<number>, query = ""): PixabayHit[] {
+export function rankHits(
+  hits: PixabayHit[],
+  minSeconds: number,
+  exclude: Set<number>,
+  query = "",
+  /** Accept a single matching query word (when an AI checks the previews anyway). */
+  loose = false,
+): PixabayHit[] {
   return hits
-    .map((hit, i) => ({ hit, i, r: pickRendition(hit), m: query ? tagMatch(hit, query) : ([1, 0] as [number, number]) }))
+    .map((hit, i) => ({ hit, i, r: pickRendition(hit), m: query ? tagMatch(hit, query, loose) : ([1, 0] as [number, number]) }))
     .filter(({ hit, r, m }) => r && hit.duration >= minSeconds && !exclude.has(hit.id) && !JUNK_TAGS.test(hit.tags) && m[0] > 0)
     .sort(
       (a, b) =>
@@ -258,12 +267,24 @@ export type FetchBrollOptions = StockOptions & {
   minClipSeconds: number;
   /** Searched when none of a segment's own terms return anything. */
   fallbackTerms: string[];
+  /**
+   * Optional AI editor: given a sentence and candidate clips, returns the ones
+   * that fit, best first. Without it, the best tag match is taken.
+   */
+  choose?: (seg: Segment, candidates: PixabayHit[]) => Promise<PixabayHit[]>;
   log?: (line: string) => void;
 };
 
+/** Candidates shown to the AI editor at once, and how many rounds it gets per sentence. */
+const CANDIDATES_PER_ROUND = 6;
+const PER_QUERY = 3;
+const MAX_ROUNDS = 3;
+
 /**
- * For each segment, searches Pixabay with that segment's keywords (best first,
- * falling back to broader terms) and downloads enough distinct clips to cover it.
+ * For each segment, searches Pixabay (the script's [search terms], then the
+ * AI's suggestions, then the sentence's own keywords, then broader fallbacks)
+ * and downloads enough distinct clips to cover it. With an AI editor, clips are
+ * chosen by looking at their previews instead of trusting tags alone.
  */
 export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptions): Promise<StockClip[]> {
   const doFetch = opts.fetchImpl ?? fetch;
@@ -277,30 +298,78 @@ export async function fetchStockBroll(segments: Segment[], opts: FetchBrollOptio
     const seg = segments[si];
     const want = Math.max(1, Math.min(opts.maxPerSegment, Math.round((seg.end - seg.start) / opts.targetShot)));
     const own = searchTerms(seg.words);
-    // Two-word query first (more specific), then each term alone, then script-wide terms, then the fallbacks.
     const queries = [
-      ...(seg.queries ?? []),
-      ...(own.length >= 2 ? [`${own[0]} ${own[1]}`] : []),
-      ...own,
-      ...scriptTerms.filter((t) => !own.includes(t)),
-      ...opts.fallbackTerms,
+      ...new Set([
+        ...(seg.queries ?? []),
+        ...(seg.aiQueries ?? []),
+        // Two-word query first (more specific), then each term alone, then script-wide terms, then the fallbacks.
+        ...(own.length >= 2 ? [`${own[0]} ${own[1]}`] : []),
+        ...own,
+        ...scriptTerms.filter((t) => !own.includes(t)),
+        ...opts.fallbackTerms,
+      ]),
     ];
 
     const picked: StockClip[] = [];
-    for (const query of queries) {
-      if (picked.length >= want) break;
-      const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query);
-      for (const hit of hits) {
+    const take = async (hit: PixabayHit, query: string) => {
+      const r = pickRendition(hit)!;
+      const file = path.join(videosDir, `${hit.id}-${r.width}x${r.height}.mp4`);
+      await download(r.url, file, doFetch);
+      used.add(hit.id);
+      picked.push({ segment: si, file, query, pixabayId: hit.id, pageURL: hit.pageURL });
+    };
+    let note = "";
+
+    if (!opts.choose) {
+      for (const query of queries) {
         if (picked.length >= want) break;
-        const r = pickRendition(hit)!;
-        const file = path.join(videosDir, `${hit.id}-${r.width}x${r.height}.mp4`);
-        await download(r.url, file, doFetch);
-        used.add(hit.id);
-        picked.push({ segment: si, file, query, pixabayId: hit.id, pageURL: hit.pageURL });
+        for (const hit of rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query)) {
+          if (picked.length >= want) break;
+          await take(hit, query);
+        }
+      }
+    } else {
+      // Collect candidates from the best searches, let the AI pick, and move on to
+      // further searches only if it rejected everything it was shown.
+      const queryOf = new Map<number, string>();
+      const seen: PixabayHit[] = [];
+      let pool: PixabayHit[] = [];
+      let rounds = 0;
+      const review = async () => {
+        rounds++;
+        for (const hit of await opts.choose!(seg, pool)) {
+          if (picked.length >= want) break;
+          if (!used.has(hit.id)) await take(hit, queryOf.get(hit.id)!);
+        }
+        pool = [];
+      };
+      for (const query of queries) {
+        if (picked.length >= want || rounds >= MAX_ROUNDS) break;
+        const hits = rankHits(await searchPixabay(query, opts), opts.minClipSeconds, used, query, true)
+          .filter((h) => !queryOf.has(h.id))
+          .slice(0, PER_QUERY);
+        for (const hit of hits) {
+          queryOf.set(hit.id, query);
+          seen.push(hit);
+          pool.push(hit);
+        }
+        if (pool.length >= CANDIDATES_PER_ROUND) await review();
+      }
+      if (pool.length && picked.length < want && rounds < MAX_ROUNDS) await review();
+      // Better a weak clip than an empty sentence: fall back to the best tag match.
+      if (!picked.length) {
+        const fallback = seen.find((h) => !used.has(h.id));
+        if (fallback) {
+          await take(fallback, queryOf.get(fallback.id)!);
+          note = " [AI rejected every candidate; using the best tag match]";
+        }
       }
     }
+
     if (!picked.length) throw new Error(`No Pixabay clips found for "${seg.text}" (tried: ${queries.join(", ")})`);
-    opts.log?.(`    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> ${[...new Set(picked.map((p) => p.query))].join(", ")} (${picked.length})`);
+    opts.log?.(
+      `    "${seg.text.slice(0, 48)}${seg.text.length > 48 ? "..." : ""}" -> ${[...new Set(picked.map((p) => p.query))].join(", ")} (${picked.length})${note}`,
+    );
     clips.push(...picked);
   }
   return clips;

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { copyFile, link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { aiConfigFromEnv, pickClips, suggestQueries } from "./pipeline/ai";
 import { listClips, measureClips, planSegmentedShots, planShots, type SourceClip } from "./pipeline/broll";
 import { alignmentToWords, buildCaptionPages, sentenceBoundaries, toSrt } from "./pipeline/captions";
 import { applyEmphasis, parseScript } from "./pipeline/emphasis";
@@ -29,6 +30,11 @@ B-roll (pick one):
   --stock-fallback <list>  Comma-separated searches used when a sentence finds nothing
                            (default: business,office,city)
   --stock-per-sentence <n> Max Pixabay clips per sentence (default: 2)
+  --no-ai                  Don't use the AI editor even if one is configured
+
+AI editor (optional, for Pixabay B-roll): set GEMINI_API_KEY, or AI_BASE_URL + AI_MODEL
+for any OpenAI-compatible server such as LM Studio (http://localhost:1234/v1).
+It writes the searches for each sentence and checks clip previews before using them.
 
 Options:
   --out <file>             Output MP4 (default: out/<script-name>.mp4)
@@ -94,6 +100,7 @@ async function main() {
       browser: { type: "string" },
       "stock-fallback": { type: "string", default: "business,office,city" },
       "stock-per-sentence": { type: "string", default: "2" },
+      "no-ai": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -188,7 +195,31 @@ async function main() {
       const seg = segments.find((s) => s.words.includes(word));
       if (seg) seg.queries = [...(seg.queries ?? []), ...hint.queries];
     }
+
+    const ai = args["no-ai"] ? undefined : aiConfigFromEnv(process.env);
+    let choose: Parameters<typeof fetchStockBroll>[1]["choose"];
+    if (ai) {
+      ai.cacheDir = path.resolve("out/.cache/ai");
+      console.log(`    AI editor: ${ai.model}${ai.vision ? " (checks clip previews)" : ""}`);
+      try {
+        const suggested = await suggestQueries(ai, segments.map((s) => s.text));
+        segments.forEach((seg, i) => (seg.aiQueries = suggested[i]));
+      } catch (err) {
+        console.warn(`    ! AI search suggestions failed, using keywords instead: ${err instanceof Error ? err.message : err}`);
+      }
+      if (ai.vision) {
+        choose = async (seg, candidates) => {
+          try {
+            return await pickClips(ai, seg.text, candidates);
+          } catch (err) {
+            console.warn(`    ! AI clip check failed, using tag order: ${err instanceof Error ? err.message : err}`);
+            return candidates;
+          }
+        };
+      }
+    }
     const stock = await fetchStockBroll(segments, {
+      choose,
       apiKey: process.env.PIXABAY_API_KEY,
       cacheDir: path.resolve("out/.cache/pixabay"),
       targetShot: planOptions.targetShot,

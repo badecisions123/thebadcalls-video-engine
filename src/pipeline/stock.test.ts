@@ -177,3 +177,48 @@ test("fetchStockBroll queries per segment, falls back, dedupes and downloads", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("with an AI editor: rejected candidates lead to the next searches, and an all-reject falls back", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "stock-"));
+  const fakeFetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.hostname !== "pixabay.com") return new Response("video");
+    const q = url.searchParams.get("q")!;
+    const ids: Record<string, number[]> = { "rental store": [1, 2, 3], vhs: [4, 5, 6], office: [7] };
+    const hits = (ids[q] ?? []).map((id) => hit(id, 1920, 1080, 10, `${q}, thing`));
+    return new Response(JSON.stringify({ total: hits.length, totalHits: hits.length, hits }));
+  }) as typeof fetch;
+  const shown: number[][] = [];
+  try {
+    const opts = {
+      cacheDir: dir,
+      fetchImpl: fakeFetch,
+      targetShot: 3,
+      maxPerSegment: 1,
+      minClipSeconds: 3,
+      fallbackTerms: [],
+    };
+    // The AI likes clip 5 only.
+    const clips = await fetchStockBroll(
+      [{ text: "A shop.", start: 0, end: 3, words: [w("shop.", 0, 1)], aiQueries: ["rental store", "vhs"] }],
+      {
+        ...opts,
+        choose: async (_seg, candidates) => {
+          shown.push(candidates.map((c) => c.id));
+          return candidates.filter((c) => c.id === 5);
+        },
+      },
+    );
+    assert.deepEqual(shown, [[1, 2, 3, 4, 5, 6]]);
+    assert.deepEqual(clips.map((c) => [c.pixabayId, c.query]), [[5, "vhs"]]);
+
+    // The AI rejects everything: the best tag match is used rather than leaving the sentence empty.
+    const fallback = await fetchStockBroll(
+      [{ text: "An office.", start: 0, end: 3, words: [w("office.", 0, 1)], aiQueries: ["office"] }],
+      { ...opts, choose: async () => [] },
+    );
+    assert.deepEqual(fallback.map((c) => c.pixabayId), [7]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -49,6 +49,25 @@ When you leave out `--broll`, the pipeline finds and downloads clips itself:
    A clip only counts as a match if the search words appear in its **first 8 tags**. Uploaders often pile on loosely related tags; one clip of a frog was tagged "netflix" in 19th place. Every word of a one- or two-word search must match, so "watching tv" won't pick a clip tagged "bird watching". Green-screen, AI-generated, cartoon/anime and "intro" clips are skipped, as are clips shorter than `--min-shot`. Portrait clips are preferred, and no clip is used twice in one video.
 4. **Download.** For each clip, the smallest file that's at least 1080px tall is downloaded, because it gets cropped to 9:16 anyway. Each sentence gets about one clip per `--target-shot` seconds, up to `--stock-per-sentence` (default 2).
 
+### AI editor (recommended)
+
+Tags alone pick a lot of unrelated footage. With an AI editor configured, two things change:
+
+1. **It writes the searches.** The AI reads the whole script once and writes 3 searches per sentence, describing what should be on screen. For example, "Blockbuster laughed them out of the room" becomes `executives laughing`, `boardroom meeting`. It never searches brand names, because stock sites don't have them.
+2. **It checks the clips.** For each sentence, about 6 candidates are gathered and the AI looks at each one's preview image, keeping only those that actually fit. If it rejects all of them, it tries the next searches, up to 3 rounds. If nothing fits even then, the best tag match is used, so a sentence is never left empty.
+
+Your `[search terms]` still go first. If the AI isn't configured or a request fails, the pipeline warns you and falls back to tag-based picking, so the video still renders. AI replies are cached in `out/.cache/ai/`, so re-renders don't repeat calls. Use `--no-ai` to switch it off for one run.
+
+Any OpenAI-compatible chat server works. Set one of these:
+
+| Provider | Settings |
+|---|---|
+| **Google Gemini** (free tier available) | `GEMINI_API_KEY=...` (optional `GEMINI_MODEL`, default `gemini-flash-latest`) |
+| **LM Studio** on your PC (free, local) | `AI_BASE_URL=http://localhost:1234/v1` and `AI_MODEL=<model name shown in LM Studio>` |
+| Groq, OpenRouter, Ollama... | `AI_BASE_URL`, `AI_MODEL`, and `AI_API_KEY` if the server needs one |
+
+To check previews, the model must accept images. Gemini does; for LM Studio, load a vision model such as Gemma 3 or Qwen2.5-VL. With a text-only model, set `AI_VISION=false` and it will only write the searches.
+
 ### Choosing the footage yourself: `[search terms]`
 
 Keyword matching works for concrete words ("chess", "office"), but not for brand names or figures of speech. Pixabay has almost no "Blockbuster" footage, and "laughed out of the room" finds a bedroom. Start a sentence with the footage you want in square brackets. Separate several searches with commas, and they're tried in order:
@@ -88,6 +107,7 @@ npm run make -- --script examples/script.txt --broll ./my-broll    # your own cl
 | `--broll <dir>` | Pixabay | Folder of your own `.mp4/.mov/.m4v/.webm/.mkv` clips. Leave it out to fetch matching clips from Pixabay |
 | `--stock-fallback <list>` | `business,office,city` | Pixabay searches to try when a sentence finds nothing |
 | `--stock-per-sentence <n>` | `2` | Max Pixabay clips per sentence |
+| `--no-ai` | | Don't use the AI editor for this run, even if one is set up |
 | `--out <file>` | `out/<script>.mp4` | Output path (the `.srt` file goes next to it) |
 | `--voice <id>` | `$ELEVENLABS_VOICE_ID` or Mark | ElevenLabs voice ID (default is "Mark", `WTUK291rZZ9CLPCiFTfh`) |
 | `--model <id>` | `eleven_multilingual_v2` | ElevenLabs model |
@@ -120,6 +140,7 @@ src/
     emphasis.ts          # *markers*, plus auto-detected names, money and bad-news words
     broll.ts             # clip discovery, planShots() and per-sentence planSegmentedShots()
     stock.ts             # sentences, keywords, Pixabay search, download and cache
+    ai.ts                # AI editor: writes searches, checks clip previews (any OpenAI-compatible API)
     render.ts            # Remotion bundle, selectComposition and renderMedia
   remotion/
     Root.tsx             # 1080x1920 composition; duration comes from props
