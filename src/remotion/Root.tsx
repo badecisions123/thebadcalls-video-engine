@@ -2,6 +2,7 @@ import { type CalculateMetadataFunction, Composition } from "remotion";
 import {
   COMPOSITION_ID,
   DEFAULT_CAPTION_STYLE,
+  DEFAULT_EFFECTS,
   VIDEO_HEIGHT,
   VIDEO_WIDTH,
   type VideoProps,
@@ -21,12 +22,13 @@ const defaultProps: VideoProps = {
       end: 3,
       words: [
         { text: "Your", start: 0, end: 0.6 },
-        { text: "captions", start: 0.6, end: 1.6 },
+        { text: "captions", start: 0.6, end: 1.6, emphasis: "key" },
         { text: "here", start: 1.6, end: 3 },
       ],
     },
   ],
   captionStyle: DEFAULT_CAPTION_STYLE,
+  effects: DEFAULT_EFFECTS,
 };
 
 // Duration comes from the voiceover, so it's computed from props at render time.

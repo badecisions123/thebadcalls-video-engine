@@ -3,9 +3,23 @@
 Turns a text script and a folder of B-roll into a finished vertical (1080×1920) MP4:
 
 1. **Voiceover**: sends the script to ElevenLabs (`/text-to-speech/{voice}/with-timestamps`), which returns the MP3 along with timings for every character.
-2. **Captions**: groups those character timings into words, then into short caption pages (3 words by default) that highlight each word as it's spoken. An `.srt` file is written next to the video.
+2. **Captions**: groups those character timings into words, then into short caption pages (3 words by default). Each word pops in as it's spoken, and key words get called out (see below). An `.srt` file is written next to the video.
 3. **B-roll**: takes the clips in the folder in name order (`clip2` comes before `clip10`) and repeats them if the voiceover runs longer. Each cut lands on a sentence or clause break when one falls inside the allowed shot length.
-4. **Render**: Remotion lays the shots out back to back, crops them to fill 9:16, adds the captions and voiceover, and renders an H.264 MP4.
+4. **Render**: Remotion lays the shots out back to back, crops them to fill 9:16, adds motion, captions, a progress bar and the voiceover, and renders an H.264 MP4.
+
+## Emphasized words
+
+Some words are made bigger and colored, and get their own line. When one is spoken, it lands with a bounce and the footage punches in:
+
+| Tone | Color | Picked automatically for |
+|---|---|---|
+| alert | red, and the frame shakes | bad news: *bankrupt*, *fired*, *lawsuit*, *collapsed*, *lost*... (list in `src/pipeline/emphasis.ts`) |
+| money | green | amounts, numbers and percentages: *$50*, *million*, *40%* |
+| key | cyan | names (capitalized words mid-sentence, first mention only) and years |
+
+To force a callout, wrap the words in asterisks in your script: `*Toys R Us* filed for *bankruptcy*`. The asterisks are removed before the script goes to ElevenLabs, and a marked word keeps its tone (so `*bankruptcy*` is still red). Use `--no-auto-emphasis` to call out only the words you've marked.
+
+B-roll cuts are lined up with sentence breaks and with the moments emphasized words land.
 
 ## Setup
 
@@ -27,12 +41,15 @@ npm run make -- --script examples/script.txt --broll ./my-broll --out out/video.
 | `--script <file>` | required | Script text file (`-` = stdin) |
 | `--broll <dir>` | required | Folder of `.mp4/.mov/.m4v/.webm/.mkv` clips |
 | `--out <file>` | `out/<script>.mp4` | Output path (the `.srt` file goes next to it) |
-| `--voice <id>` | `$ELEVENLABS_VOICE_ID` or George | ElevenLabs voice ID |
+| `--voice <id>` | `$ELEVENLABS_VOICE_ID` or Christopher | ElevenLabs voice ID (default is "Christopher - Gentle and Trustworthy", `G17SuINrv2H9FC6nvetn`) |
 | `--model <id>` | `eleven_multilingual_v2` | ElevenLabs model |
 | `--speed <n>` | `1` | Voice speed (0.7 to 1.2) |
 | `--words <n>` | `3` | Max words per caption |
 | `--min-shot / --target-shot / --max-shot <sec>` | `1.5 / 3 / 5` | B-roll pacing |
 | `--tail <sec>` | `0.5` | Time the video keeps running after the voice ends |
+| `--no-auto-emphasis` | | Only call out words marked with `*asterisks*` |
+| `--no-motion` | | Turn off the B-roll zooms, punch-ins and shake |
+| `--no-progress` | | Hide the progress bar at the top |
 | `--no-render` | | Stop after writing `out/.work/<name>/props.json` |
 | `--browser <path>` | `$REMOTION_BROWSER_EXECUTABLE` | Use an installed Chrome or headless shell |
 
@@ -51,13 +68,14 @@ src/
   pipeline/
     voiceover.ts         # ElevenLabs TTS with timestamps, cached
     captions.ts          # characters -> words -> caption pages, plus SRT output
+    emphasis.ts          # *markers*, plus auto-detected names, money and bad-news words
     broll.ts             # clip discovery and planShots() (pure, unit tested)
     render.ts            # Remotion bundle, selectComposition and renderMedia
   remotion/
     Root.tsx             # 1080x1920 composition; duration comes from props
-    VerticalVideo.tsx    # B-roll, legibility gradient, captions, audio
-    BRollTrack.tsx       # OffthreadVideo per shot, objectFit: cover
-    Captions.tsx         # pop-in caption pages with word highlight
+    VerticalVideo.tsx    # B-roll, legibility gradient, captions, progress bar, audio
+    BRollTrack.tsx       # cover-cropped shots with zoom drift, cut zoom, punch-in and shake
+    Captions.tsx         # words pop in as spoken, emphasized words bounce and glow
 ```
 
 `npm test` runs the unit tests and `npm run typecheck` runs `tsc`.
@@ -66,5 +84,6 @@ src/
 
 - ElevenLabs caps the length of a single request (about 5,000 to 10,000 characters depending on the model). Longer scripts will need to be split into chunks and joined.
 - B-roll is played in folder order. Matching clips to the script by keyword or tag would be a natural next step.
-- No background music track yet.
+- No background music or sound effects yet. A whoosh or hit under emphasized words would add a lot, and ElevenLabs' sound-effects API could generate them once and reuse them.
+- The caption font falls back to Arial Black unless Montserrat is installed. Bundling a font (for example with `@remotion/google-fonts`) would make it look the same on every machine.
 - Remotion is free for individuals and small teams. Larger companies need a [company license](https://www.remotion.dev/license).

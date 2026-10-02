@@ -1,11 +1,20 @@
 // Shared types between the Node pipeline and the Remotion composition.
 // Keep this file free of Node-only imports: it is bundled into the browser.
 
+/**
+ * How a word is called out on screen:
+ * - alert: bad news (bankrupt, fired, lawsuit...) in red
+ * - money: numbers, money and percentages in green
+ * - key:   names and anything marked *like this* in the script
+ */
+export type Emphasis = "alert" | "money" | "key";
+
 /** A single spoken word with its timing in seconds. */
 export type Word = {
   text: string;
   start: number;
   end: number;
+  emphasis?: Emphasis;
 };
 
 /** A group of words shown on screen together. */
@@ -35,7 +44,19 @@ export type CaptionStyle = {
   color: string;
   highlightColor: string;
   strokeColor: string;
+  alertColor: string;
+  moneyColor: string;
+  keyColor: string;
   uppercase: boolean;
+};
+
+export type Effects = {
+  /** Slow zoom drift on every B-roll shot, plus a quick zoom-in on each cut. */
+  kenBurns: boolean;
+  /** Footage punches in (and shakes, for alert words) when an emphasized word is spoken. */
+  punchIn: boolean;
+  /** Thin progress bar along the top edge. */
+  progressBar: boolean;
 };
 
 export type VideoProps = {
@@ -45,6 +66,7 @@ export type VideoProps = {
   shots: Shot[];
   captions: CaptionPage[];
   captionStyle: CaptionStyle;
+  effects: Effects;
 };
 
 export const VIDEO_WIDTH = 1080;
@@ -57,5 +79,14 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   color: "#FFFFFF",
   highlightColor: "#FFD400",
   strokeColor: "#000000",
+  alertColor: "#FF3B30",
+  moneyColor: "#2EE86B",
+  keyColor: "#4FD8FF",
   uppercase: true,
+};
+
+export const DEFAULT_EFFECTS: Effects = {
+  kenBurns: true,
+  punchIn: true,
+  progressBar: true,
 };
