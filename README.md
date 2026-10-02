@@ -50,7 +50,7 @@ npm run make -- --script examples/script.txt --broll ./my-broll --out out/video.
 | `--script <file>` | required | Script text file (`-` = stdin) |
 | `--broll <dir>` | required | Folder of `.mp4/.mov/.m4v/.webm/.mkv` clips |
 | `--out <file>` | `out/<script>.mp4` | Output path (the `.srt` file goes next to it) |
-| `--voice <id>` | `$ELEVENLABS_VOICE_ID` or Mark | ElevenLabs voice ID (default is "Mark - Natural Conversations", `UgBBYS2sOqTuMpoF3BR0`) |
+| `--voice <id>` | `$ELEVENLABS_VOICE_ID` or Mark | ElevenLabs voice ID (default is "Mark", `WTUK291rZZ9CLPCiFTfh`) |
 | `--model <id>` | `eleven_multilingual_v2` | ElevenLabs model |
 | `--speed <n>` | `1` | Voice speed (0.7 to 1.2) |
 | `--words <n>` | `3` | Max words per caption |

@@ -10,9 +10,8 @@ import { renderVideo } from "./pipeline/render";
 import { generateVoiceover } from "./pipeline/voiceover";
 import { CAPTION_PRESETS, DEFAULT_EFFECTS, type VideoProps } from "./types";
 
-// "Mark - Natural Conversations": the most-used Mark in the ElevenLabs voice library
-// (casual, young-adult American male).
-const DEFAULT_VOICE_ID = "UgBBYS2sOqTuMpoF3BR0";
+// "Mark" (young American male, built for social media).
+const DEFAULT_VOICE_ID = "WTUK291rZZ9CLPCiFTfh";
 
 const USAGE = `
 Usage: npm run make -- --script <file> --broll <dir> [options]
