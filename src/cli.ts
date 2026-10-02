@@ -10,8 +10,9 @@ import { renderVideo } from "./pipeline/render";
 import { generateVoiceover } from "./pipeline/voiceover";
 import { CAPTION_PRESETS, DEFAULT_EFFECTS, type VideoProps } from "./types";
 
-// "Christopher - Gentle and Trustworthy" (calm, middle-aged British narrator).
-const DEFAULT_VOICE_ID = "G17SuINrv2H9FC6nvetn";
+// "Mark - Natural Conversations": the most-used Mark in the ElevenLabs voice library
+// (casual, young-adult American male).
+const DEFAULT_VOICE_ID = "UgBBYS2sOqTuMpoF3BR0";
 
 const USAGE = `
 Usage: npm run make -- --script <file> --broll <dir> [options]
@@ -23,7 +24,7 @@ Required:
 
 Options:
   --out <file>             Output MP4 (default: out/<script-name>.mp4)
-  --voice <id>             ElevenLabs voice ID (default: $ELEVENLABS_VOICE_ID or Christopher)
+  --voice <id>             ElevenLabs voice ID (default: $ELEVENLABS_VOICE_ID or Mark)
   --model <id>             ElevenLabs model ID (default: $ELEVENLABS_MODEL_ID or eleven_multilingual_v2)
   --speed <n>              Voice speed, 0.7-1.2 (default: 1)
   --fps <n>                Frames per second (default: 30)
